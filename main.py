@@ -1,102 +1,85 @@
 import os.path
 import os
-import json
 import argparse
-import sys
+import tempfile
+import subprocess
+import shutil
+import shlex
 from datetime import datetime
-from google.auth.transport.requests import Request
-from google.oauth2.credentials import Credentials
-from google_auth_oauthlib.flow import InstalledAppFlow
-from googleapiclient.discovery import build
-
-SCOPES = ['https://www.googleapis.com/auth/documents']
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-CREDENTIALS_PATH = os.path.join(BASE_DIR, 'credentials.json')
-TOKEN_PATH = os.path.join(BASE_DIR, 'token.json')
-CONFIG_PATH = os.path.join(BASE_DIR, 'docs_config.json')
+from core import config, google_docs, parser
 
 
-def load_config():
-    if not os.path.exists(CONFIG_PATH):
-        config = {"default": "log", "aliases": {}}
-        save_config(config)
-        return config
-    with open(CONFIG_PATH, 'r') as f:
-        return json.load(f)
-
-
-def save_config(config):
-    with open(CONFIG_PATH, 'w') as f:
-        json.dump(config, f, indent=2)
-        f.write('\n')
-
-
-def resolve_alias(config, alias):
-    aliases = config.get("aliases", {})
-    if alias in aliases:
-        return aliases[alias]
+def _resolve_editor():
+    editor = os.environ.get('EDITOR')
+    if editor:
+        parts = shlex.split(editor)
+        if shutil.which(parts[0]):
+            return parts
+    for candidate in ['vim', 'nano', 'vi']:
+        path = shutil.which(candidate)
+        if path:
+            return [path]
     return None
 
 
-def get_service():
-    creds = None
-    if os.path.exists(TOKEN_PATH):
-        creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
-
-    if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
-            flow = InstalledAppFlow.from_client_secrets_file(
-                CREDENTIALS_PATH, SCOPES)
-            creds = flow.run_local_server(port=0)
-
-        with open(TOKEN_PATH, 'w') as token:
-            token.write(creds.to_json())
-
-    return build('docs', 'v1', credentials=creds)
-
-
-def fetch_doc_title(service, doc_id):
-    try:
-        doc = service.documents().get(documentId=doc_id).execute()
-        return doc.get('title', '(untitled)')
-    except Exception:
+def open_editor():
+    editor_parts = _resolve_editor()
+    if not editor_parts:
+        print("No editor found. Set $EDITOR or install vim/nano.")
         return None
 
+    tmp = tempfile.NamedTemporaryFile(
+        mode='w+', suffix='.md', delete=False
+    )
+    tmp_path = tmp.name
+    tmp.write("# Write your note here (lines starting with # are ignored)\n")
+    tmp.close()
 
-def prepend_text(service, doc_id, text):
-    request_body = {
-        'requests': [{
-            'insertText': {
-                'location': {'index': 1},
-                'text': f"{text}\n\n"
-            }
-        }]
-    }
-    service.documents().batchUpdate(
-        documentId=doc_id, body=request_body
-    ).execute()
+    try:
+        ret = subprocess.call(editor_parts + [tmp_path])
+        if ret != 0:
+            print(f"Editor exited with code {ret}. Note discarded.")
+            return None
+
+        with open(tmp_path, 'r') as f:
+            raw_lines = f.readlines()
+
+        content_lines = []
+        for line in raw_lines:
+            stripped = line.strip()
+            if stripped.startswith('#'):
+                continue
+            content_lines.append(line.rstrip('\n'))
+
+        content = "\n".join(content_lines).strip()
+        if not content:
+            print("Empty note, canceled.")
+            return None
+
+        return content
+
+    finally:
+        if os.path.exists(tmp_path):
+            os.unlink(tmp_path)
 
 
-def cmd_switch(service, config, args, current_alias):
+def cmd_switch(service, svc_config, args, current_alias):
     if not args:
         print("Usage: /switch <alias>")
         return current_alias, None
     alias = args[0]
-    doc_id = resolve_alias(config, alias)
+    doc_id = config.resolve_alias(svc_config, alias)
     if doc_id is None:
         print(f"Unknown alias '{alias}'. Use /list to see available docs.")
         return current_alias, None
-    title = fetch_doc_title(service, doc_id)
+    title = google_docs.fetch_doc_title(service, doc_id)
     display = f'"{title}"' if title else f'(id: {doc_id})'
     print(f"--- Switched to {display} ({alias}) ---")
     return alias, doc_id
 
 
-def cmd_list(service, config, current_alias):
-    aliases = config.get("aliases", {})
+def cmd_list(service, svc_config, current_alias):
+    aliases = svc_config.get("aliases", {})
     if not aliases:
         print("No documents configured.")
         return
@@ -104,31 +87,31 @@ def cmd_list(service, config, current_alias):
     print("-" * 62)
     for alias, doc_id in aliases.items():
         marker = "  (active)" if alias == current_alias else ""
-        title = fetch_doc_title(service, doc_id)
+        title = google_docs.fetch_doc_title(service, doc_id)
         display = f'"{title}"' if title else doc_id
         print(f"{alias:<12} {display:<50}{marker}")
 
 
-def cmd_add(config, args):
+def cmd_add(svc_config, args):
     if not args or len(args) < 2:
         print("Usage: /add <alias> <doc_id>")
         return
     alias, doc_id = args[0], args[1]
-    aliases = config.setdefault("aliases", {})
+    aliases = svc_config.setdefault("aliases", {})
     if alias in aliases:
         print(f"Alias '{alias}' already exists. Use /remove first or pick another name.")
         return
     aliases[alias] = doc_id
-    save_config(config)
+    config.save_config(svc_config)
     print(f"--- Added alias '{alias}' ({doc_id}) ---")
 
 
-def cmd_remove(config, args, current_alias):
+def cmd_remove(svc_config, args, current_alias):
     if not args:
         print("Usage: /remove <alias>")
         return None
     alias = args[0]
-    aliases = config.get("aliases", {})
+    aliases = svc_config.get("aliases", {})
     if alias not in aliases:
         print(f"Alias '{alias}' not found.")
         return None
@@ -136,25 +119,25 @@ def cmd_remove(config, args, current_alias):
     if confirm.lower() != 'y':
         print("Canceled.")
         return None
-    doc_id = aliases.pop(alias)
-    default = config.get("default")
+    aliases.pop(alias)
+    default = svc_config.get("default")
     if alias == default:
-        config["default"] = next(iter(aliases)) if aliases else ""
+        svc_config["default"] = next(iter(aliases)) if aliases else ""
     if alias == current_alias:
-        save_config(config)
+        config.save_config(svc_config)
         print(f"--- Removed '{alias}' ---")
         return True
-    save_config(config)
+    config.save_config(svc_config)
     print(f"--- Removed '{alias}' ---")
     return None
 
 
-def cmd_rename(config, args):
+def cmd_rename(svc_config, args):
     if not args or len(args) < 2:
         print("Usage: /rename <old_alias> <new_alias>")
         return
     old, new = args[0], args[1]
-    aliases = config.get("aliases", {})
+    aliases = svc_config.get("aliases", {})
     if old not in aliases:
         print(f"Alias '{old}' not found.")
         return
@@ -162,19 +145,19 @@ def cmd_rename(config, args):
         print(f"Alias '{new}' already exists.")
         return
     aliases[new] = aliases.pop(old)
-    if config.get("default") == old:
-        config["default"] = new
-    save_config(config)
+    if svc_config.get("default") == old:
+        svc_config["default"] = new
+    config.save_config(svc_config)
     print(f"--- Renamed '{old}' -> '{new}' ---")
 
 
-def cmd_current(service, config, current_alias):
-    aliases = config.get("aliases", {})
+def cmd_current(service, svc_config, current_alias):
+    aliases = svc_config.get("aliases", {})
     if current_alias not in aliases:
         print("No active document.")
         return
     doc_id = aliases[current_alias]
-    title = fetch_doc_title(service, doc_id)
+    title = google_docs.fetch_doc_title(service, doc_id)
     print(f"Alias:    {current_alias}")
     print(f"Doc ID:   {doc_id}")
     print(f"Title:    {title if title else '(failed to fetch)'}")
@@ -182,6 +165,7 @@ def cmd_current(service, config, current_alias):
 
 def cmd_help():
     print("Available commands:")
+    print("  /edit             Open $EDITOR to compose a multi-line note")
     print("  /switch <alias>   Switch to a different document")
     print("  /list             List all configured documents")
     print("  /add <a> <id>     Add a new document alias")
@@ -192,32 +176,43 @@ def cmd_help():
     print("  exit              Quit the application")
 
 
-def dispatch(service, config, line, current_alias, current_doc_id):
+def dispatch(service, svc_config, line, current_alias, current_doc_id):
     parts = line.strip().split()
     command = parts[0].lower()
     args = parts[1:]
 
     if command == '/switch':
-        alias, doc_id = cmd_switch(service, config, args, current_alias)
+        alias, doc_id = cmd_switch(service, svc_config, args, current_alias)
         if doc_id is not None:
             return alias, doc_id
+    elif command == '/edit':
+        if current_doc_id is None:
+            print("No active document to save to.")
+        else:
+            content = open_editor()
+            if content:
+                timestamp = datetime.now().strftime("[%m/%d/%y] (%H:%M)|")
+                entry_with_time = f"{timestamp} {content}"
+                google_docs.prepend_text(service, current_doc_id, entry_with_time)
+                parser.index_note(content, timestamp, current_doc_id, content)
+                print(f"--- Prepended editor content on {timestamp} ---")
     elif command == '/list':
-        cmd_list(service, config, current_alias)
+        cmd_list(service, svc_config, current_alias)
     elif command == '/add':
-        cmd_add(config, args)
+        cmd_add(svc_config, args)
     elif command == '/remove':
-        result = cmd_remove(config, args, current_alias)
+        result = cmd_remove(svc_config, args, current_alias)
         if result is True:
-            aliases = config.get("aliases", {})
-            default = config.get("default", "")
+            aliases = svc_config.get("aliases", {})
+            default = svc_config.get("default", "")
             if aliases and default in aliases:
-                title = fetch_doc_title(service, aliases[default])
+                title = google_docs.fetch_doc_title(service, aliases[default])
                 display = f'"{title}"' if title else aliases[default]
                 print(f"--- Switched to default alias '{default}' ({display}) ---")
                 return default, aliases[default]
             elif aliases:
                 new_alias = next(iter(aliases))
-                title = fetch_doc_title(service, aliases[new_alias])
+                title = google_docs.fetch_doc_title(service, aliases[new_alias])
                 display = f'"{title}"' if title else aliases[new_alias]
                 print(f"--- Switched to '{new_alias}' ({display}) ---")
                 return new_alias, aliases[new_alias]
@@ -225,9 +220,9 @@ def dispatch(service, config, line, current_alias, current_doc_id):
                 print("No documents remaining. Add one with /add.")
                 return None, None
     elif command == '/rename':
-        cmd_rename(config, args)
+        cmd_rename(svc_config, args)
     elif command == '/current':
-        cmd_current(service, config, current_alias)
+        cmd_current(service, svc_config, current_alias)
     elif command == '/help':
         cmd_help()
     else:
@@ -244,10 +239,17 @@ def main():
                         help='List configured aliases and exit')
     parser.add_argument('--add', nargs=2, metavar=('ALIAS', 'DOC_ID'),
                         help='Add a document alias and exit')
+    parser.add_argument('--tui', action='store_true',
+                        help='Launch the rich TUI interface')
     args = parser.parse_args()
 
-    config = load_config()
-    aliases = config.get("aliases", {})
+    if args.tui:
+        from mydocbot_app import MyDocBotApp
+        MyDocBotApp().run()
+        return
+
+    svc_config = config.load_config()
+    aliases = svc_config.get("aliases", {})
 
     if not aliases:
         print("No documents configured. Add one with:")
@@ -265,13 +267,13 @@ def main():
             print(f"Alias '{alias}' already exists.")
             return
         aliases[alias] = doc_id
-        save_config(config)
+        config.save_config(svc_config)
         print(f"Added alias '{alias}' ({doc_id}).")
         return
 
-    service = get_service()
+    service = google_docs.get_service()
 
-    start_alias = args.doc or config.get("default", "")
+    start_alias = args.doc or svc_config.get("default", "")
     if not start_alias or start_alias not in aliases:
         print(f"Alias '{start_alias}' not found. Available aliases:")
         for a in aliases:
@@ -280,7 +282,7 @@ def main():
 
     current_alias = start_alias
     current_doc_id = aliases[current_alias]
-    current_title = fetch_doc_title(service, current_doc_id)
+    current_title = google_docs.fetch_doc_title(service, current_doc_id)
 
     if current_title:
         print(f"--- MyDocBot is active on \"{current_title}\" ---")
@@ -307,17 +309,15 @@ def main():
                 return
 
             if stripped.startswith('/') and not lines:
-                result = dispatch(service, config, stripped, current_alias, current_doc_id)
+                result = dispatch(service, svc_config, stripped, current_alias, current_doc_id)
                 if result and result[0] is not None:
                     new_alias, new_doc_id = result
                     if new_alias != current_alias or new_doc_id != current_doc_id:
                         current_alias = new_alias
                         current_doc_id = new_doc_id
-                        current_title = fetch_doc_title(service, current_doc_id)
+                        current_title = google_docs.fetch_doc_title(service, current_doc_id)
                         display = f'"{current_title}"' if current_title else current_doc_id
                         print(f"--- Now on {display} ({current_alias}) ---")
-                    else:
-                        pass
                 elif result is None or result == (None, None):
                     if not aliases:
                         print("No documents available. Use /add to add one.")
@@ -340,7 +340,8 @@ def main():
         full_note = "\n".join(lines)
         timestamp = datetime.now().strftime("[%m/%d/%y] (%H:%M)|")
         entry_with_time = f"{timestamp} {full_note}"
-        prepend_text(service, current_doc_id, entry_with_time)
+        google_docs.prepend_text(service, current_doc_id, entry_with_time)
+        parser.index_note(full_note, timestamp, current_doc_id, full_note)
         doc_label = current_title or current_doc_id[:20] + "..."
         print(f"--- Prepended to \"{doc_label}\" on {timestamp} ---")
 
