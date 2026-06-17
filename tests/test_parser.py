@@ -2,7 +2,8 @@ import os
 import json
 import tempfile
 import core.parser as prs
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+from googleapiclient.errors import HttpError
 from core.google_docs import parse_entries, prepend_text
 from conftest import make_doc_response
 
@@ -173,6 +174,69 @@ class TestPrependText:
         result = prepend_text(failing_service, "doc_1", "test note")
         assert result is False
 
+    def test_retries_on_429_then_succeeds(self):
+        service = MagicMock()
+        responses = [
+            HttpError(MagicMock(status=429), b"rate limit"),
+            HttpError(MagicMock(status=429), b"rate limit again"),
+            MagicMock(),
+        ]
+        service.documents().batchUpdate().execute.side_effect = responses
+        with patch('core.google_docs.time.sleep') as mock_sleep:
+            result = prepend_text(service, "doc_1", "test note")
+        assert result is True
+        assert mock_sleep.call_count == 2
+
+    def test_retries_on_503_then_succeeds(self):
+        service = MagicMock()
+        responses = [
+            HttpError(MagicMock(status=503), b"unavailable"),
+            MagicMock(),
+        ]
+        service.documents().batchUpdate().execute.side_effect = responses
+        with patch('core.google_docs.time.sleep'):
+            result = prepend_text(service, "doc_1", "test note")
+        assert result is True
+
+    def test_returns_false_after_max_retries(self):
+        service = MagicMock()
+        service.documents().batchUpdate().execute.side_effect = (
+            HttpError(MagicMock(status=503), b"still down")
+        )
+        with patch('core.google_docs.time.sleep'):
+            result = prepend_text(service, "doc_1", "test note")
+        assert result is False
+
+    def test_does_not_retry_non_transient_error(self):
+        service = MagicMock()
+        service.documents().batchUpdate().execute.side_effect = (
+            HttpError(MagicMock(status=403), b"forbidden")
+        )
+        with patch('core.google_docs.time.sleep') as mock_sleep:
+            result = prepend_text(service, "doc_1", "test note")
+        assert result is False
+        assert mock_sleep.call_count == 0
+
+    def test_retry_on_connection_error(self):
+        service = MagicMock()
+        service.documents().batchUpdate().execute.side_effect = [
+            ConnectionError("network down"),
+            MagicMock(),
+        ]
+        with patch('core.google_docs.time.sleep'):
+            result = prepend_text(service, "doc_1", "test note")
+        assert result is True
+
+    def test_exponential_backoff_delays(self):
+        service = MagicMock()
+        service.documents().batchUpdate().execute.side_effect = (
+            HttpError(MagicMock(status=503), b"busy")
+        )
+        with patch('core.google_docs.time.sleep') as mock_sleep:
+            prepend_text(service, "doc_1", "test note")
+        assert mock_sleep.call_args_list[0][0][0] == 1
+        assert mock_sleep.call_args_list[1][0][0] == 2
+
 
 class TestSearchCache:
     def test_returns_empty_when_no_match(self):
@@ -216,3 +280,69 @@ class TestSearchCache:
     def test_empty_cache(self):
         result = prs.search_cache([], "d1", "hello")
         assert result == []
+
+
+class TestFilterTagEntriesByDate:
+    def test_no_filters_returns_all(self):
+        entries = [{"ts": "[06/01/26] (10:00)|", "doc_id": "d1", "preview": "a"}]
+        result = prs.filter_tag_entries_by_date(entries)
+        assert len(result) == 1
+
+    def test_since_filters_older(self):
+        entries = [
+            {"ts": "[05/01/26] (10:00)|", "doc_id": "d1", "preview": "old"},
+            {"ts": "[06/15/26] (10:00)|", "doc_id": "d1", "preview": "new"},
+        ]
+        result = prs.filter_tag_entries_by_date(entries, since="06/01/26")
+        assert len(result) == 1
+        assert result[0]["preview"] == "new"
+
+    def test_until_filters_newer(self):
+        entries = [
+            {"ts": "[05/01/26] (10:00)|", "doc_id": "d1", "preview": "old"},
+            {"ts": "[06/15/26] (10:00)|", "doc_id": "d1", "preview": "new"},
+        ]
+        result = prs.filter_tag_entries_by_date(entries, until="06/01/26")
+        assert len(result) == 1
+        assert result[0]["preview"] == "old"
+
+    def test_both_since_and_until(self):
+        entries = [
+            {"ts": "[04/01/26] (10:00)|", "doc_id": "d1", "preview": "too old"},
+            {"ts": "[05/15/26] (10:00)|", "doc_id": "d1", "preview": "just right"},
+            {"ts": "[06/15/26] (10:00)|", "doc_id": "d1", "preview": "too new"},
+        ]
+        result = prs.filter_tag_entries_by_date(entries, since="05/01/26", until="06/01/26")
+        assert len(result) == 1
+        assert result[0]["preview"] == "just right"
+
+    def test_empty_entries(self):
+        result = prs.filter_tag_entries_by_date([], since="06/01/26")
+        assert result == []
+
+
+class TestParseDateFlags:
+    def test_no_flags(self):
+        rest, since, until = prs.parse_date_flags(["meeting"])
+        assert rest == ["meeting"]
+        assert since is None
+        assert until is None
+
+    def test_since_flag(self):
+        rest, since, until = prs.parse_date_flags(["meeting", "--since", "06/01/26"])
+        assert rest == ["meeting"]
+        assert since == "06/01/26"
+        assert until is None
+
+    def test_until_flag(self):
+        rest, since, until = prs.parse_date_flags(["meeting", "--until", "06/15/26"])
+        assert rest == ["meeting"]
+        assert until == "06/15/26"
+
+    def test_both_flags(self):
+        rest, since, until = prs.parse_date_flags(
+            ["meeting", "--since", "06/01/26", "--until", "06/15/26"]
+        )
+        assert rest == ["meeting"]
+        assert since == "06/01/26"
+        assert until == "06/15/26"

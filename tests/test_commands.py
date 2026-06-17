@@ -38,11 +38,11 @@ class TestCmdAdd:
 
     def test_duplicate_alias(self, capsys):
         from main import cmd_add
-        config = {"default": "", "aliases": {"existing": "id1"}}
-        cmd_add(config, ["existing", "id2"])
+        config = {"default": "", "aliases": {"existing": "valid_doc_id_123"}}
+        cmd_add(config, ["existing", "another_valid_id_456"])
         captured = capsys.readouterr()
         assert "already exists" in captured.out
-        assert config["aliases"]["existing"] == "id1"
+        assert config["aliases"]["existing"] == "valid_doc_id_123"
 
     def test_missing_args(self, capsys):
         from main import cmd_add
