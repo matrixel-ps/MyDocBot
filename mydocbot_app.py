@@ -9,7 +9,6 @@ from textual.app import App, ComposeResult
 from textual.widgets import Header, Static, ListView, ListItem, Label, Input, TextArea, Button
 from textual.containers import Horizontal, Vertical
 from textual.screen import Screen
-from textual import work
 from textual.reactive import reactive
 from textual.message import Message
 from textual.binding import Binding
@@ -131,12 +130,11 @@ class MyDocBotApp(App):
     def on_mount(self):
         self.init_app()
 
-    @work(thread=True)
     def init_app(self):
         try:
             aliases = self.svc_config.get("aliases", {})
             if not aliases:
-                self.call_from_thread(self.show_error, "No docs configured. Use CLI --add first.")
+                self.show_error("No docs configured. Use CLI --add first.")
                 return
 
             default = self.svc_config.get("default", "")
@@ -159,14 +157,14 @@ class MyDocBotApp(App):
 
             self.all_tags = parser.load_tags_index()
         except Exception as e:
-            self.call_from_thread(self.show_error, f"Startup error: {e}")
+            self.show_error(f"Startup error: {e}")
             if not self.current_alias:
                 self.current_alias = "?"
             if not self.current_doc_id:
                 self.current_doc_id = "?"
             self.current_title = "(error)"
 
-        self.call_from_thread(self.refresh_ui)
+        self.refresh_ui()
 
     def refresh_ui(self):
         header = self.query_one("#header-bar")
@@ -291,15 +289,14 @@ class MyDocBotApp(App):
         else:
             self.update_status(f"Unknown: {command}. Type /help")
 
-    @work(thread=True)
     def cmd_switch(self, args):
         if not args:
-            self.call_from_thread(self.update_status, "Usage: /switch <alias>")
+            self.update_status("Usage: /switch <alias>")
             return
         alias = args[0]
         doc_id = config.resolve_alias(self.svc_config, alias)
         if not doc_id:
-            self.call_from_thread(self.update_status, f"Unknown alias '{alias}'")
+            self.update_status(f"Unknown alias '{alias}'")
             return
         title = google_docs.fetch_doc_title(self.docs._service, doc_id)
         self.current_alias = alias
@@ -313,9 +310,8 @@ class MyDocBotApp(App):
             self.notes_cache.insert(0, {
                 "ts": ts, "text": body, "doc_id": doc_id
             })
-        self.call_from_thread(self.refresh_ui)
-        self.call_from_thread(self.update_status,
-                            f"Switched to '{alias}' ({title or doc_id})")
+        self.refresh_ui()
+        self.update_status(f"Switched to '{alias}' ({title or doc_id})")
 
     def cmd_list(self):
         aliases = self.svc_config.get("aliases", {})
@@ -356,7 +352,7 @@ class MyDocBotApp(App):
             self.svc_config["default"] = next(iter(aliases)) if aliases else ""
         config.save_config(self.svc_config)
         if alias == self.current_alias:
-            self.call_from_thread(self.switch_to_any_doc)
+            self.switch_to_any_doc()
         else:
             self.update_status(f"Removed '{alias}'")
 
@@ -389,12 +385,10 @@ class MyDocBotApp(App):
             f"Doc ID:   {self.current_doc_id}"
         )
 
-    @work(thread=True)
     def cmd_edit(self):
         editor_parts = self._resolve_editor()
         if not editor_parts:
-            self.call_from_thread(self.update_status,
-                                "No editor found. Set $EDITOR.")
+            self.update_status("No editor found. Set $EDITOR.")
             return
         tmp = tempfile.NamedTemporaryFile(
             mode='w+', suffix='.md', delete=False
@@ -405,8 +399,7 @@ class MyDocBotApp(App):
         try:
             ret = subprocess.call(editor_parts + [tmp_path])
             if ret != 0:
-                self.call_from_thread(self.update_status,
-                                    f"Editor exited with code {ret}")
+                self.update_status(f"Editor exited with code {ret}")
                 return
             with open(tmp_path) as f:
                 raw_lines = f.readlines()
@@ -414,7 +407,7 @@ class MyDocBotApp(App):
                            if not l.strip().startswith('#')]
             content = "\n".join(content_lines).strip()
             if not content:
-                self.call_from_thread(self.update_status, "Empty note")
+                self.update_status("Empty note")
                 return
             timestamp = datetime.now().strftime("[%m/%d/%y] (%H:%M)|")
             entry = f"{timestamp} {content}"
@@ -423,22 +416,20 @@ class MyDocBotApp(App):
             self.notes_cache.insert(0, {
                 "ts": timestamp, "text": content, "doc_id": self.current_doc_id
             })
-            self.call_from_thread(self.refresh_ui)
-            self.call_from_thread(self.update_status,
-                                f"Prepended editor content")
+            self.refresh_ui()
+            self.update_status("Prepended editor content")
         finally:
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
 
-    @work(thread=True)
     def switch_to_any_doc(self):
         aliases = self.svc_config.get("aliases", {})
         if not aliases:
-            self.call_from_thread(self.update_status, "No docs remaining.")
+            self.update_status("No docs remaining.")
             self.current_alias = None
             self.current_doc_id = None
             self.current_title = None
-            self.call_from_thread(self.refresh_ui)
+            self.refresh_ui()
             return
         alias = next(iter(aliases))
         doc_id = aliases[alias]
@@ -446,9 +437,8 @@ class MyDocBotApp(App):
         self.current_alias = alias
         self.current_doc_id = doc_id
         self.current_title = title or doc_id[:20] + "..."
-        self.call_from_thread(self.refresh_ui)
-        self.call_from_thread(self.update_status,
-                            f"Switched to '{alias}'")
+        self.refresh_ui()
+        self.update_status(f"Switched to '{alias}'")
 
     def cmd_tag(self, args):
         if not args:
