@@ -397,7 +397,8 @@ class MyDocBotApp(App):
         tmp.write("# Write your note here (# lines ignored)\n")
         tmp.close()
         try:
-            ret = subprocess.call(editor_parts + [tmp_path])
+            with self.suspend():
+                ret = subprocess.call(editor_parts + [tmp_path])
             if ret != 0:
                 self.update_status(f"Editor exited with code {ret}")
                 return
@@ -411,13 +412,15 @@ class MyDocBotApp(App):
                 return
             timestamp = datetime.now().strftime("[%m/%d/%y] (%H:%M)|")
             entry = f"{timestamp} {content}"
-            google_docs.prepend_text(self.docs._service, self.current_doc_id, entry)
-            parser.index_note(content, timestamp, self.current_doc_id, content)
-            self.notes_cache.insert(0, {
-                "ts": timestamp, "text": content, "doc_id": self.current_doc_id
-            })
-            self.refresh_ui()
-            self.update_status("Prepended editor content")
+            if google_docs.prepend_text(self.docs._service, self.current_doc_id, entry):
+                parser.index_note(content, timestamp, self.current_doc_id, content)
+                self.notes_cache.insert(0, {
+                    "ts": timestamp, "text": content, "doc_id": self.current_doc_id
+                })
+                self.refresh_ui()
+                self.update_status("Prepended editor content")
+            else:
+                self.update_status("Failed to prepend note")
         finally:
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)

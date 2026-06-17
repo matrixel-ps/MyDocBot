@@ -1,4 +1,5 @@
 import os
+import sys
 import asyncio
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
@@ -40,17 +41,22 @@ def fetch_doc_title(service, doc_id):
 
 
 def prepend_text(service, doc_id, text):
-    request_body = {
-        'requests': [{
-            'insertText': {
-                'location': {'index': 1},
-                'text': f"{text}\n\n"
-            }
-        }]
-    }
-    service.documents().batchUpdate(
-        documentId=doc_id, body=request_body
-    ).execute()
+    try:
+        request_body = {
+            'requests': [{
+                'insertText': {
+                    'location': {'index': 1},
+                    'text': f"{text}\n\n"
+                }
+            }]
+        }
+        service.documents().batchUpdate(
+            documentId=doc_id, body=request_body
+        ).execute()
+        return True
+    except Exception as e:
+        print(f"Error: Failed to prepend note — {e}", file=sys.stderr)
+        return False
 
 
 class AsyncGoogleDocs:

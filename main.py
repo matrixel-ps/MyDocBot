@@ -189,9 +189,9 @@ def dispatch(service, svc_config, line, current_alias, current_doc_id):
             if content:
                 timestamp = datetime.now().strftime("[%m/%d/%y] (%H:%M)|")
                 entry_with_time = f"{timestamp} {content}"
-                google_docs.prepend_text(service, current_doc_id, entry_with_time)
-                parser.index_note(content, timestamp, current_doc_id, content)
-                print(f"--- Prepended editor content on {timestamp} ---")
+                if google_docs.prepend_text(service, current_doc_id, entry_with_time):
+                    parser.index_note(content, timestamp, current_doc_id, content)
+                    print(f"--- Prepended editor content on {timestamp} ---")
     elif command == '/list':
         cmd_list(service, svc_config, current_alias)
     elif command == '/add':
@@ -334,10 +334,10 @@ def main():
         full_note = "\n".join(lines)
         timestamp = datetime.now().strftime("[%m/%d/%y] (%H:%M)|")
         entry_with_time = f"{timestamp} {full_note}"
-        google_docs.prepend_text(service, current_doc_id, entry_with_time)
-        parser.index_note(full_note, timestamp, current_doc_id, full_note)
-        doc_label = current_title or current_doc_id[:20] + "..."
-        print(f"--- Prepended to \"{doc_label}\" on {timestamp} ---")
+        if google_docs.prepend_text(service, current_doc_id, entry_with_time):
+            parser.index_note(full_note, timestamp, current_doc_id, full_note)
+            doc_label = current_title or current_doc_id[:20] + "..."
+            print(f"--- Prepended to \"{doc_label}\" on {timestamp} ---")
 
 
 if __name__ == '__main__':
