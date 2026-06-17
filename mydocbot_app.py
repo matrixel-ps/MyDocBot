@@ -108,7 +108,7 @@ Screen {
 class NoteItem(ListItem):
     def __init__(self, timestamp, text, doc_id):
         preview = text[:80].replace('\n', ' ')
-        time_part = timestamp[11:16] if len(timestamp) >= 16 else timestamp
+        time_part = timestamp[12:17] if len(timestamp) >= 17 else timestamp
         tags = parser.extract_tags(text)
         tag_str = f"  [#a6e3a1]{' '.join(f'#{t}' for t in tags[:3])}[/]" if tags else ""
         label = Label(f"[{time_part}] {preview}{tag_str}")
@@ -201,7 +201,7 @@ class MyDocBotApp(App):
                 ).execute(),
                 count=20
             )
-            for ts, body in recent:
+            for ts, body in reversed(recent):
                 self._add_to_cache(ts, body, self.current_doc_id)
 
             self.all_tags = parser.load_tags_index()
@@ -388,7 +388,7 @@ class MyDocBotApp(App):
             self.docs._service.documents().get(documentId=doc_id).execute(),
             count=20
         )
-        for ts, body in recent:
+        for ts, body in reversed(recent):
             self._add_to_cache(ts, body, doc_id)
         self._last_selected_index = 0
         self.refresh_ui()
