@@ -109,27 +109,23 @@ def cmd_add(svc_config, args):
 def cmd_remove(svc_config, args, current_alias):
     if not args:
         print("Usage: /remove <alias>")
-        return None
+        return False
     alias = args[0]
     aliases = svc_config.get("aliases", {})
     if alias not in aliases:
         print(f"Alias '{alias}' not found.")
-        return None
+        return False
     confirm = input(f"Remove alias '{alias}' ({aliases[alias]})? [y/N] ")
     if confirm.lower() != 'y':
         print("Canceled.")
-        return None
+        return False
     aliases.pop(alias)
     default = svc_config.get("default")
     if alias == default:
         svc_config["default"] = next(iter(aliases)) if aliases else ""
-    if alias == current_alias:
-        config.save_config(svc_config)
-        print(f"--- Removed '{alias}' ---")
-        return True
     config.save_config(svc_config)
     print(f"--- Removed '{alias}' ---")
-    return None
+    return True
 
 
 def cmd_rename(svc_config, args):
@@ -201,8 +197,8 @@ def dispatch(service, svc_config, line, current_alias, current_doc_id):
     elif command == '/add':
         cmd_add(svc_config, args)
     elif command == '/remove':
-        result = cmd_remove(svc_config, args, current_alias)
-        if result is True:
+        removed = cmd_remove(svc_config, args, current_alias)
+        if removed and args and args[0] == current_alias:
             aliases = svc_config.get("aliases", {})
             default = svc_config.get("default", "")
             if aliases and default in aliases:
@@ -309,21 +305,19 @@ def main():
                 return
 
             if stripped.startswith('/') and not lines:
-                result = dispatch(service, svc_config, stripped, current_alias, current_doc_id)
-                if result and result[0] is not None:
-                    new_alias, new_doc_id = result
-                    if new_alias != current_alias or new_doc_id != current_doc_id:
-                        current_alias = new_alias
-                        current_doc_id = new_doc_id
-                        current_title = google_docs.fetch_doc_title(service, current_doc_id)
-                        display = f'"{current_title}"' if current_title else current_doc_id
-                        print(f"--- Now on {display} ({current_alias}) ---")
-                elif result is None or result == (None, None):
+                new_alias, new_doc_id = dispatch(service, svc_config, stripped, current_alias, current_doc_id)
+                if new_alias is None and new_doc_id is None:
                     if not aliases:
                         print("No documents available. Use /add to add one.")
                         current_alias = None
                         current_doc_id = None
                         current_title = None
+                elif new_alias != current_alias or new_doc_id != current_doc_id:
+                    current_alias = new_alias
+                    current_doc_id = new_doc_id
+                    current_title = google_docs.fetch_doc_title(service, current_doc_id)
+                    display = f'"{current_title}"' if current_title else current_doc_id
+                    print(f"--- Now on {display} ({current_alias}) ---")
                 break
 
             if stripped == "" and not lines:

@@ -108,7 +108,7 @@ def parse_entries(doc, count=2):
         part = part.strip()
         if not part:
             continue
-        m = re.match(r'(\[\d{2}/\d{2}/\d{2\}\s*\(\d{2}:\d{2}\)\|)', part)
+        m = re.match(r'(\[\d{2}/\d{2}/\d{2}\]\s*\(\d{2}:\d{2}\)\|)', part)
         if m:
             ts = m.group(1)
             body = part[len(ts):].strip()
