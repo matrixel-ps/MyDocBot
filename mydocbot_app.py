@@ -107,6 +107,8 @@ class MyDocBotApp(App):
         Binding("escape", "focus_input", "Back"),
     ]
 
+    MAX_CACHE = 500
+
     def __init__(self):
         super().__init__()
         self.svc_config = config.load_config()
@@ -116,6 +118,12 @@ class MyDocBotApp(App):
         self.current_title = None
         self.notes_cache = []
         self.all_tags = {}
+        self._last_selected_index = 0
+
+    def _add_to_cache(self, ts, text, doc_id):
+        self.notes_cache.insert(0, {"ts": ts, "text": text, "doc_id": doc_id})
+        if len(self.notes_cache) > self.MAX_CACHE:
+            self.notes_cache[:] = self.notes_cache[:self.MAX_CACHE]
 
     def compose(self) -> ComposeResult:
         yield Static("Connecting...", id="header-bar")
@@ -151,9 +159,7 @@ class MyDocBotApp(App):
                 count=2
             )
             for ts, body in recent:
-                self.notes_cache.append({
-                    "ts": ts, "text": body, "doc_id": self.current_doc_id
-                })
+                self._add_to_cache(ts, body, self.current_doc_id)
 
             self.all_tags = parser.load_tags_index()
         except Exception as e:
@@ -179,14 +185,16 @@ class MyDocBotApp(App):
             item = NoteItem(n["ts"], n["text"], n["doc_id"])
             notes_list.append(item)
         if doc_notes:
-            notes_list.index = 0
-            self.show_note_preview(0)
+            idx = min(self._last_selected_index, len(doc_notes) - 1)
+            notes_list.index = idx
+            self.show_note_preview(idx)
 
         self.update_status("Ready")
 
     def on_list_view_selected(self, event):
         notes_list = self.query_one("#notes-list")
         if notes_list.index is not None:
+            self._last_selected_index = notes_list.index
             self.show_note_preview(notes_list.index)
 
     def show_note_preview(self, index):
@@ -228,9 +236,7 @@ class MyDocBotApp(App):
 
         parser.index_note(text, timestamp, self.current_doc_id, text)
 
-        self.notes_cache.insert(0, {
-            "ts": timestamp, "text": text, "doc_id": self.current_doc_id
-        })
+        self._add_to_cache(timestamp, text, self.current_doc_id)
 
         tags = parser.extract_tags(text)
         tag_str = ' '.join(f'#{t}' for t in tags) if tags else '(no tags)'
@@ -307,9 +313,8 @@ class MyDocBotApp(App):
             count=2
         )
         for ts, body in recent:
-            self.notes_cache.insert(0, {
-                "ts": ts, "text": body, "doc_id": doc_id
-            })
+            self._add_to_cache(ts, body, doc_id)
+        self._last_selected_index = 0
         self.refresh_ui()
         self.update_status(f"Switched to '{alias}' ({title or doc_id})")
 
@@ -414,9 +419,7 @@ class MyDocBotApp(App):
             entry = f"{timestamp} {content}"
             if google_docs.prepend_text(self.docs._service, self.current_doc_id, entry):
                 parser.index_note(content, timestamp, self.current_doc_id, content)
-                self.notes_cache.insert(0, {
-                    "ts": timestamp, "text": content, "doc_id": self.current_doc_id
-                })
+                self._add_to_cache(timestamp, content, self.current_doc_id)
                 self.refresh_ui()
                 self.update_status("Prepended editor content")
             else:

@@ -1,4 +1,5 @@
 import os
+import sys
 import json
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -10,8 +11,14 @@ def load_config():
         config = {"default": "log", "aliases": {}}
         save_config(config)
         return config
-    with open(CONFIG_PATH, 'r') as f:
-        return json.load(f)
+    try:
+        with open(CONFIG_PATH, 'r') as f:
+            return json.load(f)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"Warning: Corrupt config at {CONFIG_PATH} — {e}. Starting fresh.", file=sys.stderr)
+        config = {"default": "", "aliases": {}}
+        save_config(config)
+        return config
 
 
 def save_config(config):
