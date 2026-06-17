@@ -1,5 +1,6 @@
 import os
 import json
+import sys
 import core.config as cfg
 
 
@@ -45,3 +46,27 @@ class TestResolveAlias:
     def test_empty_aliases(self):
         config = {"default": "", "aliases": {}}
         assert cfg.resolve_alias(config, "anything") is None
+
+
+class TestLoadConfigErrors:
+    def test_corrupt_json_returns_fallback(self, tmp_config_path):
+        with open(tmp_config_path, 'w') as f:
+            f.write("{invalid json here")
+        result = cfg.load_config()
+        assert result == {"default": "", "aliases": {}}
+
+    def test_corrupt_json_overwrites_with_valid(self, tmp_config_path):
+        with open(tmp_config_path, 'w') as f:
+            f.write("{broken")
+        cfg.load_config()
+        with open(tmp_config_path) as f:
+            loaded = json.load(f)
+        assert loaded == {"default": "", "aliases": {}}
+
+    def test_corrupt_json_prints_warning(self, tmp_config_path, capsys):
+        with open(tmp_config_path, 'w') as f:
+            f.write("{garbage}")
+        cfg.load_config()
+        captured = capsys.readouterr()
+        assert "Warning:" in captured.err
+        assert "Corrupt config" in captured.err
