@@ -43,3 +43,42 @@ def search_cache(cache, doc_id, keyword):
     return [n for n in cache
             if n["doc_id"] == doc_id
             and keyword.lower() in n["text"].lower()]
+
+
+def _parse_date(date_str):
+    month, day, year = date_str.split("/")
+    return (int(year), int(month), int(day))
+
+
+def parse_date_flags(args):
+    rest = []
+    since = None
+    until = None
+    i = 0
+    while i < len(args):
+        if args[i] == '--since' and i + 1 < len(args):
+            since = args[i + 1]
+            i += 2
+        elif args[i] == '--until' and i + 1 < len(args):
+            until = args[i + 1]
+            i += 2
+        else:
+            rest.append(args[i])
+            i += 1
+    return rest, since, until
+
+
+def filter_tag_entries_by_date(entries, since=None, until=None):
+    if not since and not until:
+        return entries
+    since_tuple = _parse_date(since) if since else None
+    until_tuple = _parse_date(until) if until else None
+    result = []
+    for e in entries:
+        date_tuple = _parse_date(e["ts"][1:9])
+        if since_tuple and date_tuple < since_tuple:
+            continue
+        if until_tuple and date_tuple > until_tuple:
+            continue
+        result.append(e)
+    return result

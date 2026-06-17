@@ -1,6 +1,7 @@
 import os
 import sys
 import json
+from core.validation import validate_config
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_PATH = os.path.join(BASE_DIR, 'docs_config.json')
@@ -13,7 +14,13 @@ def load_config():
         return config
     try:
         with open(CONFIG_PATH, 'r') as f:
-            return json.load(f)
+            cfg = json.load(f)
+        valid, msg = validate_config(cfg)
+        if not valid:
+            print(f"Warning: Invalid config schema — {msg}. Starting fresh.", file=sys.stderr)
+            cfg = {"default": "", "aliases": {}}
+            save_config(cfg)
+        return cfg
     except (json.JSONDecodeError, OSError) as e:
         print(f"Warning: Corrupt config at {CONFIG_PATH} — {e}. Starting fresh.", file=sys.stderr)
         config = {"default": "", "aliases": {}}

@@ -1,6 +1,8 @@
 import os
 import sys
+import time
 import asyncio
+from googleapiclient.errors import HttpError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -32,9 +34,27 @@ def get_service():
     return build('docs', 'v1', credentials=creds)
 
 
+def _api_call_with_retry(fn, max_retries=3):
+    for attempt in range(max_retries):
+        try:
+            return fn()
+        except HttpError as e:
+            if e.resp.status in (429, 500, 502, 503, 504) and attempt < max_retries - 1:
+                time.sleep(1 * (2 ** attempt))
+                continue
+            raise
+        except (ConnectionError, TimeoutError):
+            if attempt < max_retries - 1:
+                time.sleep(1 * (2 ** attempt))
+                continue
+            raise
+
+
 def fetch_doc_title(service, doc_id):
     try:
-        doc = service.documents().get(documentId=doc_id).execute()
+        doc = _api_call_with_retry(
+            lambda: service.documents().get(documentId=doc_id).execute()
+        )
         return doc.get('title', '(untitled)')
     except Exception:
         return None
@@ -50,9 +70,11 @@ def prepend_text(service, doc_id, text):
                 }
             }]
         }
-        service.documents().batchUpdate(
-            documentId=doc_id, body=request_body
-        ).execute()
+        _api_call_with_retry(
+            lambda: service.documents().batchUpdate(
+                documentId=doc_id, body=request_body
+            ).execute()
+        )
         return True
     except Exception as e:
         print(f"Error: Failed to prepend note — {e}", file=sys.stderr)
