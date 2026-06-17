@@ -1,11 +1,11 @@
 import os
-import json
-import tempfile
-import core.parser as prs
 from unittest.mock import MagicMock, patch
-from googleapiclient.errors import HttpError
-from core.google_docs import parse_entries, prepend_text
+
 from conftest import make_doc_response
+from googleapiclient.errors import HttpError
+
+import core.parser as prs
+from core.google_docs import parse_entries, prepend_text
 
 
 class TestExtractTags:
@@ -81,9 +81,6 @@ class TestIndexNote:
         long_text = "x" * 100
         prs.index_note(f"#{long_text}", "[01/01/26]", "doc_1", long_text)
         index = prs.load_tags_index()
-        tag_name = long_text.lower()[:80]
-        # tag name from re.findall(r'#(\w+)', ...) is the matched group, 
-        # not the full text. The preview is truncated to 80.
         assert len(index[long_text.lower()][0]["preview"]) <= 80
 
     def test_dedup_same_entry(self, tmp_tags_index_path):
@@ -346,3 +343,31 @@ class TestParseDateFlags:
         assert rest == ["meeting"]
         assert since == "06/01/26"
         assert until == "06/15/26"
+
+
+class TestPendingQueue:
+    def test_empty_queue(self, tmp_pending_path):
+        assert prs.count_pending() == 0
+        assert prs.load_pending_notes() == []
+
+    def test_queue_note(self, tmp_pending_path):
+        prs.queue_note("test note", "doc_1", "[06/17/26] (14:30)|")
+        assert prs.count_pending() == 1
+        notes = prs.load_pending_notes()
+        assert notes[0]["text"] == "test note"
+        assert notes[0]["doc_id"] == "doc_1"
+
+    def test_multiple_queued_notes(self, tmp_pending_path):
+        prs.queue_note("first", "doc_1", "t1")
+        prs.queue_note("second", "doc_1", "t2")
+        assert prs.count_pending() == 2
+
+    def test_save_pending_removes_file_when_empty(self, tmp_pending_path):
+        prs.queue_note("test", "doc_1", "t1")
+        prs.save_pending_notes([])
+        assert not os.path.exists(tmp_pending_path)
+        assert prs.count_pending() == 0
+
+    def test_flush_empty_queue(self, tmp_pending_path, mock_service):
+        result = prs.flush_pending_notes(mock_service)
+        assert result == 0

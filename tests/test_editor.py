@@ -1,8 +1,6 @@
-import pytest
 import shutil
-import os
 
-from main import _resolve_editor
+from core.commands import _resolve_editor
 
 
 class TestResolveEditor:

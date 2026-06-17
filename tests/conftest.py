@@ -1,7 +1,7 @@
-import pytest
-import json
 import os
 import tempfile
+
+import pytest
 
 
 @pytest.fixture
@@ -33,6 +33,17 @@ def tmp_tags_index_path(monkeypatch):
     tmp_path = tmp.name
     tmp.close()
     monkeypatch.setattr('core.parser.TAGS_INDEX_PATH', tmp_path)
+    yield tmp_path
+    if os.path.exists(tmp_path):
+        os.unlink(tmp_path)
+
+
+@pytest.fixture
+def tmp_pending_path(monkeypatch):
+    tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+    tmp_path = tmp.name
+    tmp.close()
+    monkeypatch.setattr('core.parser.PENDING_PATH', tmp_path)
     yield tmp_path
     if os.path.exists(tmp_path):
         os.unlink(tmp_path)
