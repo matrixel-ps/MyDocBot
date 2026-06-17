@@ -1,6 +1,5 @@
 import re
 
-
 MAX_NOTE_LENGTH = 50 * 1024
 
 

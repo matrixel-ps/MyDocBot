@@ -1,6 +1,7 @@
+import json
 import os
 import sys
-import json
+
 from core.validation import validate_config
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -13,7 +14,7 @@ def load_config():
         save_config(config)
         return config
     try:
-        with open(CONFIG_PATH, 'r') as f:
+        with open(CONFIG_PATH) as f:
             cfg = json.load(f)
         valid, msg = validate_config(cfg)
         if not valid:
