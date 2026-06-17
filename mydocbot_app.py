@@ -13,7 +13,7 @@ from textual.screen import Screen
 from textual.reactive import reactive
 from textual.message import Message
 from textual.binding import Binding
-from core import config, google_docs, parser
+from core import config, google_docs, parser, validation
 
 CSS = """
 Screen {
@@ -304,6 +304,11 @@ class MyDocBotApp(App):
             self.handle_command(text)
             return
 
+        valid, msg = validation.validate_note(text)
+        if not valid:
+            self.update_status(f"Note rejected: {msg}")
+            return
+
         input_bar.text = ""
         timestamp = datetime.now().strftime("[%m/%d/%y] (%H:%M)|")
         entry = f"{timestamp} {text}"
@@ -415,6 +420,10 @@ class MyDocBotApp(App):
             self.update_status("Usage: /add <alias> <doc_id>")
             return
         alias, doc_id = args[0], args[1]
+        valid, msg = validation.validate_doc_id(doc_id)
+        if not valid:
+            self.update_status(f"Invalid doc_id: {msg}")
+            return
         aliases = self.svc_config.setdefault("aliases", {})
         if alias in aliases:
             self.update_status(f"Alias '{alias}' already exists.")
@@ -552,11 +561,15 @@ class MyDocBotApp(App):
         elif args[0] == 'list':
             self.cmd_tag_list()
         elif args[0] == 'search' and len(args) >= 2:
-            self.cmd_tag_search(args[1])
+            rest, since, until = parser.parse_date_flags(args[1:])
+            if rest:
+                self.cmd_tag_search(rest[0], since, until)
+            else:
+                self.update_status("Usage: /tag search <tag> [--since MM/DD/YY] [--until MM/DD/YY]")
         elif args[0] == 'stats':
             self.cmd_tag_stats()
         else:
-            self.update_status("Usage: /tag list | /tag search <tag> | /tag stats")
+            self.update_status("Usage: /tag list | /tag search <tag> [--since] [--until] | /tag stats")
 
     def cmd_tag_list(self):
         tags = parser.load_tags_index()
@@ -571,12 +584,13 @@ class MyDocBotApp(App):
         preview = self.query_one("#preview-pane")
         preview.update("[b]Tag Index[/b]\n\n" + "\n".join(lines))
 
-    def cmd_tag_search(self, tag):
+    def cmd_tag_search(self, tag, since=None, until=None):
         tags = parser.load_tags_index()
         tag = tag.lower().lstrip('#')
         entries = tags.get(tag, [])
         doc_entries = [e for e in entries
                       if e["doc_id"] == self.current_doc_id]
+        doc_entries = parser.filter_tag_entries_by_date(doc_entries, since, until)
         if not doc_entries:
             self.update_status(f"No notes with #{tag}")
             return

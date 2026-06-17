@@ -6,7 +6,7 @@ import subprocess
 import shutil
 import shlex
 from datetime import datetime
-from core import config, google_docs, parser
+from core import config, google_docs, parser, validation
 
 
 def _resolve_editor():
@@ -97,6 +97,10 @@ def cmd_add(svc_config, args):
         print("Usage: /add <alias> <doc_id>")
         return
     alias, doc_id = args[0], args[1]
+    valid, msg = validation.validate_doc_id(doc_id)
+    if not valid:
+        print(f"Invalid doc_id: {msg}")
+        return
     aliases = svc_config.setdefault("aliases", {})
     if alias in aliases:
         print(f"Alias '{alias}' already exists. Use /remove first or pick another name.")
@@ -165,11 +169,15 @@ def cmd_tag(service, svc_config, args, current_alias, current_doc_id):
     elif args[0] == 'list':
         cmd_tag_list(svc_config, current_doc_id)
     elif args[0] == 'search' and len(args) >= 2:
-        cmd_tag_search(svc_config, args[1], current_doc_id)
+        rest, since, until = parser.parse_date_flags(args[1:])
+        if rest:
+            cmd_tag_search(svc_config, rest[0], current_doc_id, since, until)
+        else:
+            print("Usage: /tag search <tag> [--since MM/DD/YY] [--until MM/DD/YY]")
     elif args[0] == 'stats':
         cmd_tag_stats(svc_config, current_doc_id)
     else:
-        print("Usage: /tag list | /tag search <tag> | /tag stats")
+        print("Usage: /tag list | /tag search <tag> [--since] [--until] | /tag stats")
 
 
 def cmd_tag_list(svc_config, current_doc_id):
@@ -185,11 +193,12 @@ def cmd_tag_list(svc_config, current_doc_id):
             print(f"  #{tag:<18} {count}")
 
 
-def cmd_tag_search(svc_config, tag, current_doc_id):
+def cmd_tag_search(svc_config, tag, current_doc_id, since=None, until=None):
     tags = parser.load_tags_index()
     tag = tag.lower().lstrip('#')
     entries = tags.get(tag, [])
     doc_entries = [e for e in entries if e["doc_id"] == current_doc_id]
+    doc_entries = parser.filter_tag_entries_by_date(doc_entries, since, until)
     if not doc_entries:
         print(f"No notes with #{tag}")
         return
@@ -397,6 +406,10 @@ def main():
             continue
 
         full_note = "\n".join(lines)
+        valid, msg = validation.validate_note(full_note)
+        if not valid:
+            print(f"Note rejected: {msg}")
+            continue
         timestamp = datetime.now().strftime("[%m/%d/%y] (%H:%M)|")
         entry_with_time = f"{timestamp} {full_note}"
         if google_docs.prepend_text(service, current_doc_id, entry_with_time):
