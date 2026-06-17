@@ -160,3 +160,47 @@ class TestPrependText:
         )
         result = prepend_text(failing_service, "doc_1", "test note")
         assert result is False
+
+
+class TestSearchCache:
+    def test_returns_empty_when_no_match(self):
+        cache = [{"ts": "t1", "text": "hello world", "doc_id": "d1"}]
+        result = prs.search_cache(cache, "d1", "nope")
+        assert result == []
+
+    def test_returns_matching_entries(self):
+        cache = [
+            {"ts": "t1", "text": "hello world", "doc_id": "d1"},
+            {"ts": "t2", "text": "goodbye world", "doc_id": "d1"},
+        ]
+        result = prs.search_cache(cache, "d1", "hello")
+        assert len(result) == 1
+        assert result[0]["ts"] == "t1"
+
+    def test_case_insensitive(self):
+        cache = [{"ts": "t1", "text": "Hello World", "doc_id": "d1"}]
+        result = prs.search_cache(cache, "d1", "hello")
+        assert len(result) == 1
+
+    def test_respects_doc_id(self):
+        cache = [
+            {"ts": "t1", "text": "hello", "doc_id": "d1"},
+            {"ts": "t2", "text": "hello", "doc_id": "d2"},
+        ]
+        result = prs.search_cache(cache, "d1", "hello")
+        assert len(result) == 1
+        assert result[0]["doc_id"] == "d1"
+
+    def test_partial_word_match(self):
+        cache = [{"ts": "t1", "text": "hello there", "doc_id": "d1"}]
+        result = prs.search_cache(cache, "d1", "ello")
+        assert len(result) == 1
+
+    def test_multi_word_keyword(self):
+        cache = [{"ts": "t1", "text": "hello world today", "doc_id": "d1"}]
+        result = prs.search_cache(cache, "d1", "world today")
+        assert len(result) == 1
+
+    def test_empty_cache(self):
+        result = prs.search_cache([], "d1", "hello")
+        assert result == []
