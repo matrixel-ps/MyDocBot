@@ -60,12 +60,41 @@ class TestCmdRemove:
         monkeypatch.setattr('builtins.input', lambda _: "y")
         result = cmd_remove(config, ["test"], None)
         assert "test" not in config["aliases"]
+        assert result is True
+
+    def test_removes_current_returns_true(self, tmp_config_path, monkeypatch):
+        import core.config as cfg
+        from main import cmd_remove
+        monkeypatch.setattr('core.config.CONFIG_PATH', tmp_config_path)
+        config = {"default": "current", "aliases": {"current": "id1"}}
+        monkeypatch.setattr('builtins.input', lambda _: "y")
+        result = cmd_remove(config, ["current"], "current")
+        assert result is True
+        assert "current" not in config["aliases"]
 
     def test_not_found(self, capsys):
         from main import cmd_remove
         result = cmd_remove({"aliases": {}}, ["unknown"], None)
         captured = capsys.readouterr()
         assert "not found" in captured.out
+        assert result is False
+
+    def test_no_args(self, capsys):
+        from main import cmd_remove
+        result = cmd_remove({"aliases": {}}, [], None)
+        captured = capsys.readouterr()
+        assert "Usage" in captured.out
+        assert result is False
+
+    def test_canceled(self, monkeypatch, capsys):
+        from main import cmd_remove
+        config = {"default": "", "aliases": {"test": "id1"}}
+        monkeypatch.setattr('builtins.input', lambda _: "n")
+        result = cmd_remove(config, ["test"], None)
+        captured = capsys.readouterr()
+        assert "Canceled" in captured.out
+        assert result is False
+        assert "test" in config["aliases"]
 
 
 class TestCmdRename:

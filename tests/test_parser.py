@@ -2,6 +2,8 @@ import os
 import json
 import tempfile
 import core.parser as prs
+from core.google_docs import parse_entries
+from conftest import make_doc_response
 
 
 class TestExtractTags:
@@ -81,3 +83,65 @@ class TestIndexNote:
         # tag name from re.findall(r'#(\w+)', ...) is the matched group, 
         # not the full text. The preview is truncated to 80.
         assert len(index[long_text.lower()][0]["preview"]) <= 80
+
+
+class TestParseEntries:
+    def test_single_valid_entry(self):
+        text = "[06/17/26] (14:30)| Meeting notes"
+        doc = make_doc_response(text)
+        entries = parse_entries(doc, count=5)
+        assert len(entries) == 1
+        ts, body = entries[0]
+        assert ts == "[06/17/26] (14:30)|"
+        assert body == "Meeting notes"
+
+    def test_multiple_entries_count_respected(self):
+        text = (
+            "[06/17/26] (14:30)| First note\n\n"
+            "[06/17/26] (15:00)| Second note\n\n"
+            "[06/17/26] (15:30)| Third note"
+        )
+        doc = make_doc_response(text)
+        entries = parse_entries(doc, count=2)
+        assert len(entries) == 2
+        assert entries[0][1] == "First note"
+        assert entries[1][1] == "Second note"
+
+    def test_multiple_entries_less_than_count(self):
+        text = "[06/17/26] (14:30)| Only one"
+        doc = make_doc_response(text)
+        entries = parse_entries(doc, count=5)
+        assert len(entries) == 1
+
+    def test_no_timestamped_entries(self):
+        text = "Plain text without any timestamp markers"
+        doc = make_doc_response(text)
+        entries = parse_entries(doc)
+        assert entries == []
+
+    def test_empty_doc(self):
+        doc = {"body": {"content": []}}
+        entries = parse_entries(doc)
+        assert entries == []
+
+    def test_malformed_content_does_not_match(self):
+        text = "[06/17/26} (14:30)| Wrong bracket"
+        doc = make_doc_response(text)
+        entries = parse_entries(doc)
+        assert entries == []
+
+    def test_multiline_body_preserved(self):
+        text = "[06/17/26] (14:30)| Line one\nLine two\nLine three"
+        doc = make_doc_response(text)
+        entries = parse_entries(doc, count=5)
+        assert len(entries) == 1
+        _, body = entries[0]
+        assert body == "Line one\nLine two\nLine three"
+
+    def test_leading_text_before_first_entry(self):
+        text = "Garbage header\n\n[06/17/26] (14:30)| First real note"
+        doc = make_doc_response(text)
+        entries = parse_entries(doc, count=5)
+        assert len(entries) == 1
+        _, body = entries[0]
+        assert body == "First real note"

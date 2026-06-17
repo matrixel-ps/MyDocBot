@@ -38,6 +38,17 @@ def tmp_tags_index_path(monkeypatch):
         os.unlink(tmp_path)
 
 
+def make_doc_response(text: str) -> dict:
+    """Wrap plain text into a Google Doc API body.content structure."""
+    return {
+        "body": {
+            "content": [
+                {"paragraph": {"elements": [{"textRun": {"content": text}}]}}
+            ]
+        }
+    }
+
+
 @pytest.fixture
 def mock_service(monkeypatch):
     class MockService:
