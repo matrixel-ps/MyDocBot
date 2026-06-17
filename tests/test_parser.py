@@ -85,6 +85,18 @@ class TestIndexNote:
         # not the full text. The preview is truncated to 80.
         assert len(index[long_text.lower()][0]["preview"]) <= 80
 
+    def test_dedup_same_entry(self, tmp_tags_index_path):
+        prs.index_note("#bug same", "[01/01/26]", "doc_1", "same")
+        prs.index_note("#bug same", "[01/01/26]", "doc_1", "same")
+        index = prs.load_tags_index()
+        assert len(index["bug"]) == 1
+
+    def test_dedup_allows_different_ts(self, tmp_tags_index_path):
+        prs.index_note("#bug note", "[01/01/26]", "doc_1", "note")
+        prs.index_note("#bug note", "[01/02/26]", "doc_1", "note")
+        index = prs.load_tags_index()
+        assert len(index["bug"]) == 2
+
 
 class TestParseEntries:
     def test_single_valid_entry(self):

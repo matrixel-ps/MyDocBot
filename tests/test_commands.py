@@ -147,5 +147,54 @@ class TestCmdHelp:
         assert "/rename" in captured.out
         assert "/current" in captured.out
         assert "/edit" in captured.out
+        assert "/tag" in captured.out
         assert "/help" in captured.out
         assert "exit" in captured.out
+
+
+class TestCmdTag:
+    def test_list_empty(self, capsys, tmp_tags_index_path, monkeypatch):
+        from main import cmd_tag_list
+        import core.parser as prs
+        monkeypatch.setattr('core.parser.TAGS_INDEX_PATH', tmp_tags_index_path)
+        prs.save_tags_index({})
+        cmd_tag_list({"aliases": {}}, "doc_1")
+        captured = capsys.readouterr()
+        assert "No tags indexed" in captured.out
+
+    def test_list_shows_tags(self, capsys, tmp_tags_index_path, monkeypatch):
+        from main import cmd_tag_list
+        import core.parser as prs
+        monkeypatch.setattr('core.parser.TAGS_INDEX_PATH', tmp_tags_index_path)
+        prs.save_tags_index({"bug": [{"ts": "t1", "doc_id": "doc_1", "preview": "fix"}]})
+        cmd_tag_list({"aliases": {}}, "doc_1")
+        captured = capsys.readouterr()
+        assert "#bug" in captured.out
+
+    def test_search_found(self, capsys, tmp_tags_index_path, monkeypatch):
+        from main import cmd_tag_search
+        import core.parser as prs
+        monkeypatch.setattr('core.parser.TAGS_INDEX_PATH', tmp_tags_index_path)
+        prs.save_tags_index({"meeting": [{"ts": "t1", "doc_id": "doc_1", "preview": "notes"}]})
+        cmd_tag_search({"aliases": {}}, "meeting", "doc_1")
+        captured = capsys.readouterr()
+        assert "#meeting" in captured.out
+
+    def test_search_not_found(self, capsys, tmp_tags_index_path, monkeypatch):
+        from main import cmd_tag_search
+        import core.parser as prs
+        monkeypatch.setattr('core.parser.TAGS_INDEX_PATH', tmp_tags_index_path)
+        prs.save_tags_index({})
+        cmd_tag_search({"aliases": {}}, "nonexistent", "doc_1")
+        captured = capsys.readouterr()
+        assert "No notes" in captured.out
+
+    def test_stats(self, capsys, tmp_tags_index_path, monkeypatch):
+        from main import cmd_tag_stats
+        import core.parser as prs
+        monkeypatch.setattr('core.parser.TAGS_INDEX_PATH', tmp_tags_index_path)
+        prs.save_tags_index({"bug": [{"ts": "t1", "doc_id": "doc_1", "preview": "fix"}]})
+        cmd_tag_stats({"aliases": {}}, "doc_1")
+        captured = capsys.readouterr()
+        assert "#bug" in captured.out
+        assert "█" in captured.out
