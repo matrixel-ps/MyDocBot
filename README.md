@@ -16,14 +16,14 @@ User Input (CLI/TUI)
   Dispatch Layer (main.py / mydocbot_app.py)
        │
        ├──▶ Command Handler     ──▶ core/config.py (aliases)
-       │                          ▶ core/parser.py (tags)
+       │                          ▶ core/parser.py (tags, search)
        │                          ▶ core/google_docs.py (API)
        │
        └──▶ Note Submission
                │
                ├── 1. extract_tags(text) → tag index updated
                ├── 2. format_note() → timestamp + body
-               └── 3. prepend_text(service, doc_id, note)
+               └── 3. prepend_text(service, doc_id, note) → bool
 ```
 
 All writes go to Google Docs API. Tags are indexed locally in `tags_index.json` at submission time — no historical backfill.
@@ -33,8 +33,8 @@ All writes go to Google Docs API. Tags are indexed locally in `tags_index.json` 
 | Module | Responsibility | Key Functions |
 |---|---|---|
 | `config.py` | Document alias management | `load_config()`, `save_config()`, `resolve_alias()` |
-| `google_docs.py` | Google Docs API wrappers | `get_service()`, `prepend_text()`, `parse_entries()`, `AsyncGoogleDocs` class |
-| `parser.py` | Tag extraction & persistence | `extract_tags()`, `load_tags_index()`, `save_tags_index()`, `index_note()`, `search_tags()`, `get_tag_stats()` |
+| `google_docs.py` | Google Docs API wrappers | `get_service()`, `prepend_text()` → bool, `parse_entries()`, `AsyncGoogleDocs` |
+| `parser.py` | Tag extraction, search, persistence | `extract_tags()`, `load_tags_index()`, `index_note()`, `search_cache()` |
 
 ---
 
@@ -45,7 +45,7 @@ All writes go to Google Docs API. Tags are indexed locally in `tags_index.json` 
 - **TUI:** [Textual](https://textual.textualize.io/) 0.41+ — async widget framework
 - **Storage:** Google Docs API (`google-api-python-client`, `google-auth-oauthlib`, OAuth 2.0)
 - **Config:** Local JSON files — `docs_config.json` (aliases) and `tags_index.json` (tag index)
-- **Testing:** pytest 7.4+ with monkeypatched Google API
+- **Testing:** pytest 7.4+ with monkeypatched Google API — **66 tests, 0 network needed**
 
 ---
 
@@ -53,36 +53,44 @@ All writes go to Google Docs API. Tags are indexed locally in `tags_index.json` 
 
 ### CLI Mode (`python main.py`)
 
-- **Line-by-line input:** Type notes one line at a time; a blank line submits. The `get_multiline_input()` function accumulates lines until empty input.
-- **Slash-commands:** All commands start with `/`. Dispatch happens in `main.py` via a command string comparison block.
-- **`/edit`:** Launches `$EDITOR` with a temp `.md` file. After the editor exits, lines starting with `#` are stripped (treated as scratch/draft lines), then the remaining content is submitted as a single note.
-- **`/switch <alias>`:** Changes the active document for the session by calling `resolve_alias()`.
-- **`/add`, `/remove`, `/rename`:** Mutates `docs_config.json` in place. `/remove` prompts for confirmation.
-- **Tag commands:** `/tag list`, `/tag search <tag>`, `/tag stats` — all operate on the local `tags_index.json` only. No Google API calls.
+- **Line-by-line input:** Type notes one line at a time; a blank line submits.
+- **Slash-commands:** All commands start with `/`.
+- **`/edit`:** Launches `$EDITOR` (falls back: `$VISUAL` → `$EDITOR` → `nano`). Lines starting with `#` are stripped as draft comments.
+- **`/switch <alias>`:** Changes the active document for the session.
+- **`/add`, `/remove`, `/rename`:** Mutates `docs_config.json` in place. `/remove` prompts for confirmation and auto-switches if the current alias was removed.
+- **Tag commands:** `/tag list`, `/tag search <tag>`, `/tag stats` — all operate on local `tags_index.json` only.
+- **Error resilience:** Network failures print to stderr and continue the session.
+- **Config corruption resilience:** Corrupt `docs_config.json` is detected, a warning is printed, and a fresh config is created.
 
 ### TUI Mode (`python main.py --tui`)
 
 - **Compose layout (dock-based):** 5 visual areas:
-  - **Header dock (top):** Shows app name, current alias, doc title, and a connection indicator.
-  - **NotesList dock (left):** Scrollable list of `NoteItem` widgets (custom `ListItem` subclass). Each shows timestamp, preview snippet, and tag highlights (in `#ffaaff` purple). On startup, fetches the last 2 notes via `parse_entries()`.
-  - **Preview dock (right):** Full note text displayed in a read-only rich text widget. Updates when a note is selected.
-  - **Input dock (bottom + status bar):** Multi-line `TextArea` + a **Submit** button. Status bar shows context-sensitive hints.
+  - **Header dock (top):** Shows app name, current alias, doc title, connection indicator.
+  - **NotesList dock (left, 40%):** Date-grouped list of notes with time-only stamps and `#tag` badges.
+  - **Preview dock (right, 60%):** Full note text with highlighted `#tags`. Auto-scrolls to top on each selection.
+  - **Input dock (bottom):** Multi-line `TextArea` + **Submit** button.
   - **Status bar (very bottom):** Shows ready state or error messages.
-- **Submit button** is the primary submission mechanism. The `on_button_pressed` handler:
-  1. Gets input text
-  2. Checks for leading `/` (command dispatch)
-  3. Calls `extract_tags()`, `index_note()`, `prepend_text()`
-  4. Calls `update_notes()` to refresh the list
-  5. Clears the input
-- **Sync API calls:** Google API calls run on the main thread, blocking briefly.
-- **Event handling:** `Ctrl+E` focuses input, `Ctrl+N` focuses notes list, `Ctrl+P` focuses preview pane.
-- **Dark theme:** Catppuccin-inspired palette. Background `#1e1e2e`, accents in `#89b4fa` (blue), `#a6e3a1` (green), `#f38ba8` (red warning).
+- **Date grouping:** Notes organized under `─── Today ───`, `─── Yesterday ───`, or `─── MM/DD/YY ───` headers.
+- **Tag badges in list:** Up to 3 `#tag` names shown after each preview snippet (green).
+- **Keyboard shortcuts:**
+  - `Ctrl+S` — Submit note
+  - `Ctrl+N` — Focus notes list
+  - `Ctrl+P` — Focus preview pane
+  - `Ctrl+E` — Focus input area
+  - `Escape` — Back to input
+  - `Tab` — Cycle focus: notes → input → submit → notes
+- **Full-text search:** `/search <keyword>` filters session cache and shows results with keyword highlighting.
+- **Submit button** is the primary submission mechanism (reliable on all terminals).
+- **Sync API calls:** Google API calls run on the main thread (no threading races).
+- **Notes cache:** Newest-first, capped at 500 entries.
+- **`/edit`:** Uses Textual's `self.suspend()` for clean terminal handoff — editor opens in the foreground, TUI resumes on exit.
+- **Dark theme:** Catppuccin-inspired. Background `#1e1e2e`, accents in `#89b4fa` (blue), `#a6e3a1` (green), `#f38ba8` (red warning), `#585b70` (dimmed separators).
 
 ### Cross-Cutting Features
 
-- **`#tag` auto-detection:** Uses `re.findall(r'#(\w+)', text.lower())` — only word characters, no hyphens (`#project-x` → tag `project`).
-- **Tag persistence:** After every note submission, `index_note()` appends to `tags_index.json` with a timestamp, doc_id, and a preview (first 80 chars of the note body).
-- **OAuth flow:** Runs synchronously. `get_service()` picks up an existing `token.json` or launches the browser-based OAuth consent flow via `google-auth-oauthlib`.
+- **`#tag` auto-detection:** `re.findall(r'#(\w+)', text.lower())` — word characters only. Use `#project_alpha` for compound tags.
+- **Tag persistence:** After every submission, `index_note()` appends to `tags_index.json`.
+- **OAuth flow:** Runs synchronously. Picks up existing `token.json` or launches browser consent via `google-auth-oauthlib`.
 
 ---
 
@@ -93,7 +101,7 @@ All writes go to Google Docs API. Tags are indexed locally in `tags_index.json` 
 1. Go to [Google Cloud Console](https://console.cloud.google.com)
 2. Create a project, enable the **Google Docs API**
 3. Create OAuth 2.0 credentials (Desktop application type)
-4. Download `credentials.json` and place it in the project root
+4. Download `credentials.json` to project root
 
 ### 2. Install dependencies
 
@@ -107,39 +115,20 @@ pip install -r requirements.txt
 python main.py --add log <google_doc_id>
 ```
 
-Replace `<google_doc_id>` with the ID from the URL:
-`https://docs.google.com/document/d/THIS_IS_THE_ID/edit`
+Doc ID from URL: `https://docs.google.com/document/d/THIS_IS_THE_ID/edit`
 
 ### 4. Run
 
 ```bash
-# CLI mode (default)
-python main.py
-
-# TUI mode
-python main.py --tui
-
-# Start with specific alias
-python main.py --doc work
-
-# List all aliases
-python main.py --list
+python main.py              # CLI mode (default)
+python main.py --tui        # TUI mode
+python main.py --doc work   # Start with specific alias
+python main.py --list       # List all aliases
 ```
-
-On first run, the OAuth flow opens your browser for Google account authorization.
 
 ---
 
 ## CLI Usage
-
-### Starting
-
-```
-python main.py                   # default doc alias
-python main.py --doc work        # specific alias
-python main.py --list            # list all aliases
-python main.py --add log <id>    # register a Google Doc
-```
 
 ### Inside a Session
 
@@ -154,13 +143,14 @@ python main.py --add log <id>    # register a Google Doc
 | `/switch <alias>` | Switch active document mid-session |
 | `/list` | Show all configured aliases |
 | `/add <alias> <doc_id>` | Register a new Google Doc |
-| `/remove <alias>` | Remove an alias (asks confirmation) |
+| `/remove <alias>` | Remove an alias (asks confirmation, auto-switches) |
 | `/rename <old> <new>` | Rename an alias |
 | `/current` | Show active alias + Doc ID |
 | `/edit` | Open `$EDITOR` for multi-line note |
 | `/tag list` | All indexed tags + note counts |
 | `/tag search <tag>` | Notes matching a tag (local index) |
 | `/tag stats` | Tag frequency bar chart |
+| `/search <keyword>` | Full-text search (TUI only, session cache) |
 | `/help` | Show command list |
 | `exit` | Quit |
 
@@ -170,36 +160,38 @@ python main.py --add log <id>    # register a Google Doc
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
-│  Header Bar                                                  │
-│  MyDocBot          [log] MyDocBot Log           ● Connected  │
+│  MyDocBot          [log] "My Doc"               ● Connected  │
 ├─────────────────────────────┬────────────────────────────────┤
 │  Notes List                 │  Preview Pane                  │
-│  ── Today ──────────        │  Full note text with           │
-│  [06/16] Meeting notes      │  highlighted #tags and         │
-│  [06/16] Bug fix #bug      │  timestamp styling             │
-│                             │                                │
-│  ── Yesterday ──────        │                                │
-│  [06/15] Research spike     │                                │
-│                             │                                │
+│  ─── Today ───              │  [06/17/26] (14:30)|          │
+│  [14:30] Meeting #project   │  Met with team about the      │
+│  [13:00] Bug fix #bug      │  sprint. #project #meeting    │
+│  ─── Yesterday ───          │                                │
+│  [10:15] Research spike     │                                │
 ├─────────────────────────────┴────────────────────────────────┤
-│  Input: Type your note here...               [ Submit ]     │
+│  Type a note... (Ctrl+S to submit)           [ Submit ]     │
 ├──────────────────────────────────────────────────────────────┤
-│  Status: Ready                                       Ctrl+E  │
+│  Ready                                              Ctrl+E  │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-### Widget Tree (Textual)
+### Widget Tree
 
 ```
 MyDocBotApp (App)
 ├── Header (docked top)
 ├── HorizontalScroll (docked, fills remaining)
-│   ├── NotesList (dock left, 40% width)
-│   └── PreviewPane (dock right, 60% width)
+│   ├── NotesList (dock left, 40%) — ListView
+│   │   ├── DateSeparator (─── Today ───)
+│   │   ├── NoteItem  [14:30] Meeting #project
+│   │   ├── NoteItem  [13:00] Bug fix #bug
+│   │   ├── DateSeparator (─── Yesterday ───)
+│   │   └── NoteItem  [10:15] Research spike
+│   └── PreviewPane (dock right, 60%) — Static
 ├── InputBar (docked bottom)
-│   ├── TextArea (multiline, grows)
-│   └── SubmitButton (static width)
-└── StatusBar (docked bottom, fixed height)
+│   ├── TextArea (multiline)
+│   └── SubmitButton
+└── StatusBar (docked bottom)
 ```
 
 ---
@@ -211,8 +203,7 @@ MyDocBotApp (App)
 {
   "default": "log",
   "aliases": {
-    "log": "YOUR_DOC_ID",
-    "work": "another_doc_id_here"
+    "log": "YOUR_DOC_ID"
   }
 }
 ```
@@ -222,9 +213,9 @@ MyDocBotApp (App)
 {
   "meeting": [
     {
-      "ts": "[06/16/26] (14:30)",
+      "ts": "[06/17/26] (14:30)|",
       "doc_id": "YOUR_DOC_ID",
-      "preview": "Met with team to discuss sprint planning and roadmap prio..."
+      "preview": "Met with team to discuss sprint..."
     }
   ]
 }
@@ -237,22 +228,17 @@ MyDocBotApp (App)
 | `credentials.json` | Downloaded from Google Cloud | OAuth client config |
 | `token.json` | Generated on first auth | Cached OAuth refresh token |
 | `docs_config.json` | Created on first `--add` | Document alias registry |
-| `tags_index.json` | Auto-populated as notes are written | Local tag search index |
+| `tags_index.json` | Auto-populated | Local tag search index |
 
 ---
 
 ## Note Format
 
-Each note is prepended to the Google Doc as:
-
 ```
-[MM/DD/YY] (HH:MM)
-Note body here — multiple lines are preserved.
+[MM/DD/YY] (HH:MM)| Note body here — multiple lines preserved.
 
 #tags are included in the body as-is.
 ```
-
-The timestamp is generated via `datetime.now().strftime("[%m/%d/%y] (%H:%M)")`.
 
 ---
 
@@ -260,27 +246,26 @@ The timestamp is generated via `datetime.now().strftime("[%m/%d/%y] (%H:%M)")`.
 
 ```
 .
-├── main.py                  # Entry point — argparse, CLI REPL, command dispatch
-├── mydocbot_app.py          # Textual TUI app (MyDocBotApp, NoteItem, 5 handlers)
+├── main.py                  (344 lines) CLI entry, argparse, 12 cmd handlers, dispatch
+├── mydocbot_app.py          (636 lines) Textual TUI: DateSeparator, NoteItem, MyDocBotApp,
+│                                        9 cmd handlers, Submit + Ctrl+S, date grouping
 ├── core/
-│   ├── __init__.py          # Re-exports for other modules
-│   ├── config.py            # load_config/save_config/resolve_alias/add_alias/remove_alias/rename_alias
-│   ├── google_docs.py       # get_service (OAuth), prepend_text (sync), parse_entries,
-│   │                        # AsyncGoogleDocs class for TUI with @work wrappers
-│   └── parser.py            # extract_tags, load/save_tags_index, index_note, search_tags,
-│                            # get_tag_stats, format_note
+│   ├── __init__.py          (3 lines)  Re-exports
+│   ├── config.py            (34 lines) Alias CRUD, JSONDecodeError handling
+│   ├── google_docs.py       (122 lines) OAuth, prepend_text→bool, parse_entries, AsyncGoogleDocs
+│   └── parser.py            (43 lines) Tag extraction, index CRUD, search_cache
 ├── tests/
-│   ├── __init__.py
-│   ├── conftest.py          # Shared fixtures: mock service, temp config, temp tag index
-│   ├── test_config.py       # 8 tests — alias CRUD, resolve, error cases
-│   ├── test_parser.py       # 15 tests — extraction edge cases, index save/load/search/stats
-│   ├── test_commands.py     # 12 tests — CLI /switch, /add, /remove, /rename, /edit, /tag*
-│   └── test_editor.py       # 4 tests — EDITOR env var resolution, fallback, missing binary
-├── docs_config.json          # Local config (you modify)
-├── tags_index.json           # Auto-generated tag DB
-├── credentials.json          # Google OAuth (you provide)
-├── token.json                # Auto-generated OAuth token (gitignore this)
-└── requirements.txt          # textual>=0.41.0, pytest>=7.4.0, google-auth-oauthlib, google-api-python-client
+│   ├── conftest.py          (66 lines) Fixtures: sample_config, tmp_paths, mock_service, doc builder
+│   ├── test_config.py       (72 lines) 11 tests — CRUD + corrupt JSON handling
+│   ├── test_parser.py       (206 lines) 32 tests — tags, parse_entries, prepend_text, search_cache
+│   ├── test_commands.py     (151 lines) 16 tests — all CLI dispatch commands
+│   ├── test_dispatch.py     (78 lines)  6 tests — dispatch /remove auto-switch paths
+│   └── test_editor.py       (30 lines)  4 tests — EDITOR resolution
+├── docs_config.json          Alias config
+├── tags_index.json           Auto-generated tag DB
+├── credentials.json          Google OAuth (you provide)
+├── token.json                Auto-generated OAuth token (gitignore)
+└── requirements.txt          textual>=0.41.0, pytest>=7.4.0, google packages
 ```
 
 ---
@@ -288,61 +273,53 @@ The timestamp is generated via `datetime.now().strftime("[%m/%d/%y] (%H:%M)")`.
 ## Testing
 
 ```bash
-# Run all tests
-python -m pytest tests/ -v
-
-# Run specific test file
-python -m pytest tests/test_parser.py -v
-
-# Run by keyword
-python -m pytest tests/ -k "tag_search"
+python -m pytest tests/ -v                    # All 66 tests
+python -m pytest tests/test_parser.py -v      # Parser tests
+python -m pytest tests/ -k "search"           # Search-related tests
 ```
-
-All 37 tests use monkeypatched Google API (`unittest.mock.patch`) and `tmp_path` fixtures from pytest — no network, no OAuth, no real Google Docs needed.
-
-### Test Coverage
 
 | Module | Tests | What's covered |
 |---|---|---|
-| `test_config.py` | 8 | Load valid/missing/malformed config, save, add/remove/rename aliases, resolve |
-| `test_parser.py` | 15 | Tag extraction (simple, multi, edge chars, case folding), index load/save, search with 0/1/many results, stats, format_note timestamp |
-| `test_commands.py` | 12 | All CLI command functions: switch, list, add, remove, rename, edit, tag list/search/stats, help, exit, invalid tag |
-| `test_editor.py` | 4 | EDITOR var present, unset var (fallback to nano), non-existent binary (error), prefixed binary path |
+| `test_config.py` | 11 | Load, save, resolve, corrupt JSON fallback + warning |
+| `test_parser.py` | 32 | Tag extraction, index CRUD, parse_entries, prepend_text errors, search_cache |
+| `test_commands.py` | 16 | All CLI commands: switch, list, add, remove (bool), rename, current, help |
+| `test_dispatch.py` | 6 | Dispatch /remove auto-switch to default/first/none |
+| `test_editor.py` | 4 | EDITOR env var, fallback, missing binary |
+
+All tests use monkeypatched Google API and temp files — no network, no OAuth.
 
 ---
 
 ## Design Decisions & Known Limitations
 
-- **No async Google API in TUI:** `@work(thread=True)` was removed because it silently failed to execute. The sync call blocks the UI briefly (200-500ms typical), which is acceptable for a personal note-taking tool.
-- **Submit button instead of keyboard shortcut:** `Ctrl+Enter` was unreliable across terminals (xterm, kitty, ghostty, tmux) and OS. The Submit button always works.
-- **`NoteItem` inherits from `ListItem`** with a custom CSS class for styling. Tags are rendered with inline purple color via Rich markup (`[#ffaaff]#tag[/]`).
-- **Local-only tag index:** Tags are only indexed from the moment the feature was deployed. No historical notes are fetched from Google Docs for retroactive indexing.
-- **`#tag` regex limitation:** `#(\w+)` matches word characters only. `#project-alpha` becomes tag `project`. Use `#project_alpha` for compound tags.
-- **OAuth token file:** `token.json` is created in the project root. It should be added to `.gitignore` to avoid committing refresh tokens.
-- **Google Doc format:** The doc must have the first line as a blank line for the append-at-top approach to work cleanly. `prepend_text()` prepends the formatted note + two newlines at the very start of the document body.
+- **Submit button + Ctrl+S:** `Ctrl+Enter` was unreliable across terminals. The Submit button always works; `Ctrl+S` is a convenience that may not fire on terminals that intercept it (XOFF).
+- **Single-threaded TUI:** `@work(thread=True)` was removed because it silently swallowed execution. Sync Google API calls block the UI briefly (200-500ms), acceptable for a personal tool.
+- **Date grouping via ListItem separators:** `DateSeparator` items with `_is_separator` flag; index mapping via `_note_to_display` dict.
+- **Local-only tag index:** No historical note backfill from Google Docs.
+- **`#tag` regex:** `#(\w+)` matches word characters only — `#project-alpha` → tag `project`.
+- **Notes cache:** Newest-first order, capped at 500 entries, evicts oldest.
+- **`/edit` uses `self.suspend()`:** Clean terminal handoff via Textual's suspend/resume API.
+- **OAuth token file:** `token.json` lives in project root — add to `.gitignore`.
 
 ---
 
 ## Editor Support (`/edit`)
 
-The `/edit` command follows a specific flow:
-
-1. Creates a temp file with `.md` extension under `/tmp/`
-2. Writes a comment header showing instructions (lines start with `#`)
-3. Launches `$EDITOR` — falls back: `$VISUAL` → `$EDITOR` → `nano`
-4. Waits for the editor to exit
-5. Reads the file back, strips `#` comment lines
-6. Submits remaining content as a single note
+1. Creates temp `.md` file in `/tmp/`
+2. Writes `#` comment header as scratch buffer
+3. Launches editor: `$VISUAL` → `$EDITOR` → `nano`
+4. Waits for editor to exit
+5. Reads file, strips `#` comment lines
+6. Submits content as a single note
 7. Cleans up temp file
 
 ---
 
-## Quickstart Checklist
+## Quickstart
 
 - [ ] Enable Google Docs API in Cloud Console
 - [ ] Download `credentials.json` to project root
 - [ ] `pip install -r requirements.txt`
 - [ ] `python main.py --add mynotes <doc_id>`
 - [ ] `python main.py` (first run triggers OAuth)
-- [ ] Type some notes, try `/edit`, add `#tags`
-- [ ] Try `python main.py --tui` for the TUI
+- [ ] `python main.py --tui` for date-grouped TUI
