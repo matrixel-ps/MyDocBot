@@ -159,6 +159,66 @@ def cmd_current(service, svc_config, current_alias):
     print(f"Title:    {title if title else '(failed to fetch)'}")
 
 
+def cmd_tag(service, svc_config, args, current_alias, current_doc_id):
+    if not args:
+        cmd_tag_list(svc_config, current_doc_id)
+    elif args[0] == 'list':
+        cmd_tag_list(svc_config, current_doc_id)
+    elif args[0] == 'search' and len(args) >= 2:
+        cmd_tag_search(svc_config, args[1], current_doc_id)
+    elif args[0] == 'stats':
+        cmd_tag_stats(svc_config, current_doc_id)
+    else:
+        print("Usage: /tag list | /tag search <tag> | /tag stats")
+
+
+def cmd_tag_list(svc_config, current_doc_id):
+    tags = parser.load_tags_index()
+    if not tags:
+        print("No tags indexed yet.")
+        return
+    print(f"{'Tag':<22} {'Notes':<6}")
+    print("-" * 28)
+    for tag, entries in sorted(tags.items()):
+        count = len([e for e in entries if e["doc_id"] == current_doc_id])
+        if count > 0:
+            print(f"  #{tag:<18} {count}")
+
+
+def cmd_tag_search(svc_config, tag, current_doc_id):
+    tags = parser.load_tags_index()
+    tag = tag.lower().lstrip('#')
+    entries = tags.get(tag, [])
+    doc_entries = [e for e in entries if e["doc_id"] == current_doc_id]
+    if not doc_entries:
+        print(f"No notes with #{tag}")
+        return
+    print(f"#{tag}  ({len(doc_entries)} notes)\n")
+    for e in doc_entries:
+        print(f"  {e['ts']} {e['preview']}")
+
+
+def cmd_tag_stats(svc_config, current_doc_id):
+    tags = parser.load_tags_index()
+    if not tags:
+        print("No tags indexed yet.")
+        return
+    doc_tags = {}
+    for tag, entries in tags.items():
+        count = len([e for e in entries if e["doc_id"] == current_doc_id])
+        if count > 0:
+            doc_tags[tag] = count
+    if not doc_tags:
+        print("No tags for this document.")
+        return
+    max_count = max(doc_tags.values()) if doc_tags else 1
+    print(f"{'Tag':<22} {'Count':<6}  Bar")
+    print("-" * 50)
+    for tag, count in sorted(doc_tags.items(), key=lambda x: -x[1]):
+        bar = '█' * int(count / max_count * 20) if max_count else ''
+        print(f"  #{tag:<18} {count:<5} {bar}")
+
+
 def cmd_help():
     print("Available commands:")
     print("  /edit             Open $EDITOR to compose a multi-line note")
@@ -168,6 +228,9 @@ def cmd_help():
     print("  /remove <alias>   Remove a document alias")
     print("  /rename <o> <n>   Rename an alias")
     print("  /current          Show active document info")
+    print("  /tag list         Show all indexed tags")
+    print("  /tag search <t>   Find notes by tag")
+    print("  /tag stats        Tag frequency chart")
     print("  /help             Show this message")
     print("  exit              Quit the application")
 
@@ -217,6 +280,8 @@ def dispatch(service, svc_config, line, current_alias, current_doc_id):
                 return None, None
     elif command == '/rename':
         cmd_rename(svc_config, args)
+    elif command == '/tag':
+        cmd_tag(service, svc_config, args, current_alias, current_doc_id)
     elif command == '/current':
         cmd_current(service, svc_config, current_alias)
     elif command == '/help':

@@ -1,6 +1,7 @@
 import os
 import re
 import json
+import textwrap
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TAGS_INDEX_PATH = os.path.join(BASE_DIR, 'tags_index.json')
@@ -32,8 +33,9 @@ def index_note(text, timestamp, doc_id, preview):
         return
     index = load_tags_index()
     for tag in tags:
-        entry = {"ts": timestamp, "doc_id": doc_id, "preview": preview[:80]}
-        index.setdefault(tag, []).append(entry)
+        entry = {"ts": timestamp, "doc_id": doc_id, "preview": textwrap.shorten(preview, width=80, placeholder="...")}
+        if entry not in index.setdefault(tag, []):
+            index[tag].append(entry)
     save_tags_index(index)
 
 

@@ -1,5 +1,6 @@
 import re
 import os
+import textwrap
 import tempfile
 import subprocess
 import shutil
@@ -107,7 +108,7 @@ Screen {
 
 class NoteItem(ListItem):
     def __init__(self, timestamp, text, doc_id):
-        preview = text[:80].replace('\n', ' ')
+        preview = textwrap.shorten(text, width=80, placeholder="...").replace('\n', ' ')
         time_part = timestamp[12:17] if len(timestamp) >= 17 else timestamp
         tags = parser.extract_tags(text)
         tag_str = f"  [#a6e3a1]{' '.join(f'#{t}' for t in tags[:3])}[/]" if tags else ""
@@ -384,6 +385,7 @@ class MyDocBotApp(App):
         self.current_alias = alias
         self.current_doc_id = doc_id
         self.current_title = title or doc_id[:20] + "..."
+        self.notes_cache = [n for n in self.notes_cache if n["doc_id"] != doc_id]
         recent = google_docs.parse_entries(
             self.docs._service.documents().get(documentId=doc_id).execute(),
             count=20
@@ -402,7 +404,9 @@ class MyDocBotApp(App):
         lines = []
         for alias, doc_id in aliases.items():
             marker = " ← active" if alias == self.current_alias else ""
-            lines.append(f"  {alias:<12} {doc_id}{marker}")
+            title = google_docs.fetch_doc_title(self.docs._service, doc_id)
+            display = f'"{title}"' if title else doc_id
+            lines.append(f"  {alias:<12} {display}{marker}")
         preview = self.query_one("#preview-pane")
         preview.update("[b]Configured Documents[/b]\n\n" + "\n".join(lines))
 
