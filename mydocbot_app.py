@@ -4,7 +4,7 @@ import tempfile
 import subprocess
 import shutil
 import shlex
-from datetime import datetime
+from datetime import datetime, timedelta
 from textual.app import App, ComposeResult
 from textual.widgets import Header, Static, ListView, ListItem, Label, Input, TextArea, Button
 from textual.containers import Horizontal, Vertical
@@ -83,18 +83,48 @@ Screen {
     padding: 0 2;
     dock: bottom;
 }
+
+#input-bar:focus {
+    border: solid #89b4fa;
+}
+
+#submit-btn:focus {
+    background: #b4d0fb;
+    border: solid #89b4fa;
+}
+
+.date-separator {
+    height: 1;
+    padding: 0 1;
+}
+
+.date-separator Label {
+    padding: 0;
+    color: #585b70;
+}
 """
 
 
 class NoteItem(ListItem):
     def __init__(self, timestamp, text, doc_id):
         preview = text[:80].replace('\n', ' ')
-        label = Label(f"[{timestamp}] {preview}")
+        time_part = timestamp[11:16] if len(timestamp) >= 16 else timestamp
+        tags = parser.extract_tags(text)
+        tag_str = f"  [#a6e3a1]{' '.join(f'#{t}' for t in tags[:3])}[/]" if tags else ""
+        label = Label(f"[{time_part}] {preview}{tag_str}")
         super().__init__(label)
         self.note_ts = timestamp
         self.note_text = text
         self.note_doc_id = doc_id
-        self.tags = parser.extract_tags(text)
+        self.tags = tags
+
+
+class DateSeparator(ListItem):
+    def __init__(self, label_text):
+        label = Label(f"[bold #585b70]─── {label_text} ───[/]")
+        super().__init__(label)
+        self.classes = "date-separator"
+        self._is_separator = True
 
 
 class MyDocBotApp(App):
@@ -105,6 +135,7 @@ class MyDocBotApp(App):
         Binding("ctrl+p", "focus_preview", "Preview"),
         Binding("ctrl+e", "focus_input", "Input"),
         Binding("escape", "focus_input", "Back"),
+        Binding("ctrl+s", "submit_note", "Submit"),
     ]
 
     MAX_CACHE = 500
@@ -119,11 +150,23 @@ class MyDocBotApp(App):
         self.notes_cache = []
         self.all_tags = {}
         self._last_selected_index = 0
+        self._note_to_display = {}
 
     def _add_to_cache(self, ts, text, doc_id):
         self.notes_cache.insert(0, {"ts": ts, "text": text, "doc_id": doc_id})
         if len(self.notes_cache) > self.MAX_CACHE:
             self.notes_cache[:] = self.notes_cache[:self.MAX_CACHE]
+
+    @staticmethod
+    def _format_date_header(date_str):
+        today = datetime.now().strftime("%m/%d/%y")
+        if date_str == today:
+            return "Today"
+        yesterday = (datetime.now() - timedelta(days=1)).strftime("%m/%d/%y")
+        if date_str == yesterday:
+            return "Yesterday"
+        month, day, year = date_str.split("/")
+        return f"{month}/{day}/{year}"
 
     def compose(self) -> ComposeResult:
         yield Static("Connecting...", id="header-bar")
@@ -131,7 +174,7 @@ class MyDocBotApp(App):
             yield ListView(id="notes-list")
             yield Static("Select a note to preview", id="preview-pane")
         with Horizontal(id="input-area"):
-            yield TextArea(id="input-bar", text="", placeholder="Type a note... (click Submit)")
+            yield TextArea(id="input-bar", text="", placeholder="Type a note... (Ctrl+S to submit)")
             yield Button("Submit", id="submit-btn", variant="primary")
         yield Static("Initializing...", id="status-bar")
 
@@ -156,7 +199,7 @@ class MyDocBotApp(App):
                 self.docs._service.documents().get(
                     documentId=self.current_doc_id
                 ).execute(),
-                count=2
+                count=20
             )
             for ts, body in recent:
                 self._add_to_cache(ts, body, self.current_doc_id)
@@ -181,28 +224,60 @@ class MyDocBotApp(App):
         notes_list = self.query_one("#notes-list")
         notes_list.clear()
         doc_notes = [n for n in self.notes_cache if n["doc_id"] == self.current_doc_id]
+
+        if not doc_notes:
+            notes_list.append(
+                ListItem(Label("[#585b70]No notes yet. Type something and submit![/]"))
+            )
+            self.update_status("Ready")
+            return
+
+        current_date = None
+        self._note_to_display = {}
+        note_idx = 0
+        display_idx = 0
+
         for n in doc_notes:
+            date_part = n["ts"][1:9]
+            if date_part != current_date:
+                current_date = date_part
+                notes_list.append(DateSeparator(self._format_date_header(date_part)))
+                display_idx += 1
             item = NoteItem(n["ts"], n["text"], n["doc_id"])
             notes_list.append(item)
-        if doc_notes:
-            idx = min(self._last_selected_index, len(doc_notes) - 1)
-            notes_list.index = idx
-            self.show_note_preview(idx)
+            self._note_to_display[note_idx] = display_idx
+            note_idx += 1
+            display_idx += 1
+
+        target_note = min(self._last_selected_index, note_idx - 1)
+        display_target = self._note_to_display.get(target_note, 0)
+        notes_list.index = display_target
+        self.show_note_preview(display_target)
 
         self.update_status("Ready")
 
     def on_list_view_selected(self, event):
         notes_list = self.query_one("#notes-list")
         if notes_list.index is not None:
-            self._last_selected_index = notes_list.index
-            self.show_note_preview(notes_list.index)
+            children = list(notes_list.children)
+            idx = notes_list.index
+            if idx < len(children) and getattr(children[idx], '_is_separator', False):
+                return
+            note_idx = sum(1 for i in range(idx) if not getattr(children[i], '_is_separator', False))
+            self._last_selected_index = note_idx
+            self.show_note_preview(idx)
 
-    def show_note_preview(self, index):
+    def show_note_preview(self, display_index):
         notes_list = self.query_one("#notes-list")
         children = list(notes_list.children)
-        if not children or index >= len(children):
+        if not children or display_index >= len(children):
             return
-        item = children[index]
+        item = children[display_index]
+        while getattr(item, '_is_separator', False):
+            display_index += 1
+            if display_index >= len(children):
+                return
+            item = children[display_index]
         ts = item.note_ts
         text = item.note_text
         preview = self.query_one("#preview-pane")
@@ -212,6 +287,10 @@ class MyDocBotApp(App):
             text
         )
         preview.update(f"[#a6e3a1]{ts}[/]\n\n{highlighted}")
+        preview.scroll_home(animate=False)
+
+    def action_submit_note(self):
+        self.submit_note()
 
     def submit_note(self):
         input_bar = self.query_one("#input-bar")
@@ -264,11 +343,6 @@ class MyDocBotApp(App):
     def action_focus_input(self):
         self.query_one("#input-bar").focus()
 
-    def key_press(self, event):
-        if event.key == "tab":
-            event.prevent_default()
-            self.action_focus_notes()
-
     def handle_command(self, cmd):
         parts = cmd.strip().split()
         command = parts[0].lower()
@@ -288,6 +362,8 @@ class MyDocBotApp(App):
             self.cmd_current()
         elif command == '/edit':
             self.cmd_edit()
+        elif command == '/search':
+            self.cmd_search(args)
         elif command == '/tag':
             self.cmd_tag(args)
         elif command == '/help':
@@ -310,7 +386,7 @@ class MyDocBotApp(App):
         self.current_title = title or doc_id[:20] + "..."
         recent = google_docs.parse_entries(
             self.docs._service.documents().get(documentId=doc_id).execute(),
-            count=2
+            count=20
         )
         for ts, body in recent:
             self._add_to_cache(ts, body, doc_id)
@@ -428,6 +504,26 @@ class MyDocBotApp(App):
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
 
+    def cmd_search(self, args):
+        if not args:
+            self.update_status("Usage: /search <keyword>")
+            return
+        keyword = ' '.join(args)
+        results = parser.search_cache(self.notes_cache, self.current_doc_id, keyword)
+        if not results:
+            self.update_status(f"No notes matching '{keyword}'")
+            return
+        lines = [f"[b]Search: {keyword}[/]   {len(results)} notes\n"]
+        for n in results:
+            preview_text = n["text"].replace('\n', ' ')[:100]
+            highlighted = re.sub(
+                f'({re.escape(keyword)})', r'[bold #f9e2af]\1[/]',
+                preview_text, flags=re.IGNORECASE
+            )
+            lines.append(f"[#a6e3a1]{n['ts']}[/] {highlighted}")
+        preview = self.query_one("#preview-pane")
+        preview.update("\n".join(lines))
+
     def switch_to_any_doc(self):
         aliases = self.svc_config.get("aliases", {})
         if not aliases:
@@ -522,8 +618,9 @@ class MyDocBotApp(App):
             "  /tag list           Show all tags\n"
             "  /tag search <tag>   Find notes by tag\n"
             "  /tag stats          Tag frequency chart\n"
+            "  /search <keyword>   Search notes\n"
             "  /help               This message\n\n"
-            "[dim]Tab to Submit btn | Ctrl+N notes | Ctrl+P preview | Ctrl+E input[/]"
+            "[dim]Ctrl+S submit | Ctrl+N notes | Ctrl+P preview | Ctrl+E input[/]"
         )
 
     def _resolve_editor(self):

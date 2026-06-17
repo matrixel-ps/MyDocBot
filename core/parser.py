@@ -35,3 +35,9 @@ def index_note(text, timestamp, doc_id, preview):
         entry = {"ts": timestamp, "doc_id": doc_id, "preview": preview[:80]}
         index.setdefault(tag, []).append(entry)
     save_tags_index(index)
+
+
+def search_cache(cache, doc_id, keyword):
+    return [n for n in cache
+            if n["doc_id"] == doc_id
+            and keyword.lower() in n["text"].lower()]
