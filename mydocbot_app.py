@@ -1,18 +1,17 @@
-import re
 import os
-import textwrap
-import tempfile
-import subprocess
-import shutil
+import re
 import shlex
+import shutil
+import subprocess
+import tempfile
+import textwrap
 from datetime import datetime, timedelta
+
 from textual.app import App, ComposeResult
-from textual.widgets import Header, Static, ListView, ListItem, Label, Input, TextArea, Button
-from textual.containers import Horizontal, Vertical
-from textual.screen import Screen
-from textual.reactive import reactive
-from textual.message import Message
 from textual.binding import Binding
+from textual.containers import Horizontal
+from textual.widgets import Button, Label, ListItem, ListView, Static, TextArea
+
 from core import config, google_docs, parser, validation
 
 CSS = """
@@ -313,20 +312,20 @@ class MyDocBotApp(App):
         timestamp = datetime.now().strftime("[%m/%d/%y] (%H:%M)|")
         entry = f"{timestamp} {text}"
 
-        try:
-            google_docs.prepend_text(self.docs._service, self.current_doc_id, entry)
-        except Exception as e:
-            self.update_status(f"Error: {e}")
-            return
-
-        parser.index_note(text, timestamp, self.current_doc_id, text)
-
-        self._add_to_cache(timestamp, text, self.current_doc_id)
-
-        tags = parser.extract_tags(text)
-        tag_str = ' '.join(f'#{t}' for t in tags) if tags else '(no tags)'
-        self.refresh_ui()
-        self.update_status(f"Prepended  |  {tag_str}")
+        if google_docs.prepend_text(self.docs._service, self.current_doc_id, entry):
+            parser.index_note(text, timestamp, self.current_doc_id, text)
+            self._add_to_cache(timestamp, text, self.current_doc_id)
+            flushed = parser.flush_pending_notes(self.docs._service, self.current_doc_id)
+            tags = parser.extract_tags(text)
+            tag_str = ' '.join(f'#{t}' for t in tags) if tags else '(no tags)'
+            status = f"Prepended  |  {tag_str}"
+            if flushed:
+                status += f" (flushed {flushed})"
+            self.refresh_ui()
+            self.update_status(status)
+        else:
+            parser.queue_note(text, self.current_doc_id, timestamp)
+            self.update_status(f"Offline — queued. {parser.count_pending()} pending. /flush to retry.")
 
     def update_status(self, msg):
         status_bar = self.query_one("#status-bar")
@@ -370,6 +369,15 @@ class MyDocBotApp(App):
             self.cmd_edit()
         elif command == '/search':
             self.cmd_search(args)
+        elif command == '/flush':
+            flushed = parser.flush_pending_notes(self.docs._service)
+            pending = parser.count_pending()
+            parts = []
+            if flushed:
+                parts.append(f"Flushed {flushed}")
+            if pending:
+                parts.append(f"{pending} still pending")
+            self.update_status(" | ".join(parts) if parts else "No pending notes.")
         elif command == '/tag':
             self.cmd_tag(args)
         elif command == '/help':
@@ -498,8 +506,8 @@ class MyDocBotApp(App):
                 return
             with open(tmp_path) as f:
                 raw_lines = f.readlines()
-            content_lines = [l.rstrip('\n') for l in raw_lines
-                           if not l.strip().startswith('#')]
+            content_lines = [line.rstrip('\n') for line in raw_lines
+                           if not line.strip().startswith('#')]
             content = "\n".join(content_lines).strip()
             if not content:
                 self.update_status("Empty note")
@@ -509,10 +517,15 @@ class MyDocBotApp(App):
             if google_docs.prepend_text(self.docs._service, self.current_doc_id, entry):
                 parser.index_note(content, timestamp, self.current_doc_id, content)
                 self._add_to_cache(timestamp, content, self.current_doc_id)
+                flushed = parser.flush_pending_notes(self.docs._service, self.current_doc_id)
+                status = "Prepended editor content"
+                if flushed:
+                    status += f" (flushed {flushed})"
                 self.refresh_ui()
-                self.update_status("Prepended editor content")
+                self.update_status(status)
             else:
-                self.update_status("Failed to prepend note")
+                parser.queue_note(content, self.current_doc_id, timestamp)
+                self.update_status(f"Offline — queued. {parser.count_pending()} pending.")
         finally:
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
@@ -633,6 +646,7 @@ class MyDocBotApp(App):
             "  /rename <o> <n>     Rename alias\n"
             "  /current            Show active doc\n"
             "  /edit               Open $EDITOR\n"
+            "  /flush              Retry pending offline notes\n"
             "  /tag list           Show all tags\n"
             "  /tag search <tag>   Find notes by tag\n"
             "  /tag stats          Tag frequency chart\n"
