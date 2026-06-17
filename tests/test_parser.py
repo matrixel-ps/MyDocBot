@@ -2,7 +2,8 @@ import os
 import json
 import tempfile
 import core.parser as prs
-from core.google_docs import parse_entries
+from unittest.mock import MagicMock
+from core.google_docs import parse_entries, prepend_text
 from conftest import make_doc_response
 
 
@@ -145,3 +146,17 @@ class TestParseEntries:
         assert len(entries) == 1
         _, body = entries[0]
         assert body == "First real note"
+
+
+class TestPrependText:
+    def test_returns_true_on_success(self, mock_service):
+        result = prepend_text(mock_service, "doc_1", "test note")
+        assert result is True
+
+    def test_returns_false_on_api_error(self):
+        failing_service = MagicMock()
+        failing_service.documents().batchUpdate().execute.side_effect = (
+            Exception("API error")
+        )
+        result = prepend_text(failing_service, "doc_1", "test note")
+        assert result is False
