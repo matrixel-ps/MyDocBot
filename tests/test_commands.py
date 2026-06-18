@@ -1,4 +1,6 @@
-from unittest.mock import MagicMock
+from unittest.mock import MagicMock, patch
+
+from conftest import make_doc_response
 
 
 class TestCmdList:
@@ -188,3 +190,127 @@ class TestCmdTag:
         captured = capsys.readouterr()
         assert "#bug" in captured.out
         assert "█" in captured.out
+
+
+class TestCmdSearch:
+    """Tests for CLI /search command (fetches from API at search time)."""
+
+    def _make_service_with(self, text):
+        svc = MagicMock()
+        svc.documents().get().execute.return_value = make_doc_response(text)
+        return svc
+
+    def test_search_found(self, capsys):
+        from core.commands import cmd_search
+        note_text = "[06/18/26] (10:00)| sprint review meeting notes"
+        svc = self._make_service_with(note_text)
+        cmd_search(svc, {"default": "log", "aliases": {}}, "doc_1", ["sprint"])
+        out = capsys.readouterr().out
+        assert "sprint" in out
+        assert "1 result" in out
+
+    def test_search_not_found(self, capsys):
+        from core.commands import cmd_search
+        note_text = "[06/18/26] (10:00)| completely unrelated content"
+        svc = self._make_service_with(note_text)
+        cmd_search(svc, {"default": "log", "aliases": {}}, "doc_1", ["xyz_missing"])
+        out = capsys.readouterr().out
+        assert "No notes matching" in out
+
+    def test_search_no_args_prints_usage(self, capsys):
+        from core.commands import cmd_search
+        cmd_search(MagicMock(), {}, "doc_1", [])
+        assert "Usage" in capsys.readouterr().out
+
+    def test_search_api_error_prints_to_stderr(self, capsys):
+        from core.commands import cmd_search
+        svc = MagicMock()
+        svc.documents().get().execute.side_effect = Exception("network down")
+        cmd_search(svc, {}, "doc_1", ["anything"])
+        assert "Error" in capsys.readouterr().err
+
+    def test_search_case_insensitive(self, capsys):
+        from core.commands import cmd_search
+        note_text = "[06/18/26] (10:00)| Sprint Review"
+        svc = self._make_service_with(note_text)
+        cmd_search(svc, {}, "doc_1", ["sprint"])
+        assert "1 result" in capsys.readouterr().out
+
+    def test_search_multi_word_keyword(self, capsys):
+        from core.commands import cmd_search
+        note_text = "[06/18/26] (10:00)| sprint review completed successfully"
+        svc = self._make_service_with(note_text)
+        cmd_search(svc, {}, "doc_1", ["sprint", "review"])
+        out = capsys.readouterr().out
+        assert "1 result" in out
+
+    def test_search_respects_history_size(self, capsys):
+        """history_size from svc_config is passed to parse_entries as count."""
+        from core.commands import cmd_search
+        svc = MagicMock()
+        svc.documents().get().execute.return_value = {"body": {"content": []}}
+        with patch('core.commands.google_docs.parse_entries') as mock_parse:
+            mock_parse.return_value = []
+            cmd_search(svc, {"history_size": 75}, "doc_1", ["anything"])
+            # parse_entries(doc, count=75) — count is a keyword arg
+            mock_parse.assert_called_once()
+            assert mock_parse.call_args[1].get('count') == 75
+
+    def test_search_no_doc_id(self, capsys):
+        from core.commands import cmd_search
+        cmd_search(MagicMock(), {}, None, ["something"])
+        assert "No active document" in capsys.readouterr().out
+
+
+class TestCmdConfig:
+    """Tests for /config show and /config set history_size."""
+
+    def test_show_default(self, capsys):
+        from core.commands import cmd_config
+        cmd_config({"default": "log", "aliases": {}}, ["show"])
+        out = capsys.readouterr().out
+        assert "history_size" in out
+        assert "20" in out
+
+    def test_show_custom_value(self, capsys):
+        from core.commands import cmd_config
+        cmd_config({"default": "log", "aliases": {}, "history_size": 75}, ["show"])
+        assert "75" in capsys.readouterr().out
+
+    def test_show_no_args_same_as_show(self, capsys):
+        from core.commands import cmd_config
+        cmd_config({"default": "log", "aliases": {}}, [])
+        assert "history_size" in capsys.readouterr().out
+
+    def test_set_valid_saves_config(self, tmp_config_path, monkeypatch, capsys):
+        from core.commands import cmd_config
+        monkeypatch.setattr('core.config.CONFIG_PATH', tmp_config_path)
+        cfg = {"default": "log", "aliases": {}}
+        cmd_config(cfg, ["set", "history_size", "50"])
+        assert cfg["history_size"] == 50
+        assert "50" in capsys.readouterr().out
+
+    def test_set_invalid_value_not_saved(self, capsys):
+        from core.commands import cmd_config
+        cfg = {"default": "log", "aliases": {}}
+        cmd_config(cfg, ["set", "history_size", "0"])
+        assert "history_size" not in cfg
+        assert "Invalid" in capsys.readouterr().out
+
+    def test_set_too_high_not_saved(self, capsys):
+        from core.commands import cmd_config
+        cfg = {"default": "log", "aliases": {}}
+        cmd_config(cfg, ["set", "history_size", "999"])
+        assert "history_size" not in cfg
+        assert "Invalid" in capsys.readouterr().out
+
+    def test_set_unknown_key(self, capsys):
+        from core.commands import cmd_config
+        cfg = {"default": "log", "aliases": {}}
+        cmd_config(cfg, ["set", "bad_key", "10"])
+        assert "Unknown" in capsys.readouterr().out
+
+    def test_set_missing_value_shows_usage(self, capsys):
+        from core.commands import cmd_config
+        cmd_config({}, ["set", "history_size"])
+        assert "Usage" in capsys.readouterr().out

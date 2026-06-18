@@ -70,3 +70,21 @@ class TestLoadConfigErrors:
         captured = capsys.readouterr()
         assert "Warning:" in captured.err
         assert "Corrupt config" in captured.err
+
+
+class TestGetHistorySize:
+    def test_default_when_missing(self):
+        config = {"default": "log", "aliases": {}}
+        assert cfg.get_history_size(config) == 20
+
+    def test_returns_custom_value(self):
+        config = {"default": "log", "aliases": {}, "history_size": 75}
+        assert cfg.get_history_size(config) == 75
+
+    def test_coerces_string_to_int(self):
+        config = {"default": "log", "aliases": {}, "history_size": "50"}
+        assert cfg.get_history_size(config) == 50
+
+    def test_returns_default_on_bad_value(self):
+        config = {"default": "log", "aliases": {}, "history_size": "bad"}
+        assert cfg.get_history_size(config) == 20

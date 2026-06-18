@@ -73,3 +73,38 @@ class TestValidateNote:
         valid, msg = validation.validate_note(long_text)
         assert not valid
         assert "exceeds" in msg
+
+
+class TestValidateHistorySize:
+    def test_valid_midrange(self):
+        valid, msg = validation.validate_history_size("50")
+        assert valid
+        assert msg is None
+
+    def test_minimum_boundary(self):
+        valid, msg = validation.validate_history_size(1)
+        assert valid
+
+    def test_maximum_boundary(self):
+        valid, msg = validation.validate_history_size(500)
+        assert valid
+
+    def test_too_low(self):
+        valid, msg = validation.validate_history_size("0")
+        assert not valid
+        assert "between" in msg
+
+    def test_too_high(self):
+        valid, msg = validation.validate_history_size("501")
+        assert not valid
+        assert "between" in msg
+
+    def test_non_integer_string(self):
+        valid, msg = validation.validate_history_size("abc")
+        assert not valid
+        assert "integer" in msg
+
+    def test_none_value(self):
+        valid, msg = validation.validate_history_size(None)
+        assert not valid
+        assert "integer" in msg
