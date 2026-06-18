@@ -1,21 +1,21 @@
 import argparse
 from datetime import datetime
 
-from core import config, google_docs, validation
+from core import config, google_docs, parser, validation
 from core.commands import dispatch
 
 
 def main():
-    parser = argparse.ArgumentParser(description="MyDocBot - terminal note-taker for Google Docs")
-    parser.add_argument('--doc', '-d', type=str, default=None,
-                        help='Start with the given document alias')
-    parser.add_argument('--list', '-l', action='store_true',
-                        help='List configured aliases and exit')
-    parser.add_argument('--add', nargs=2, metavar=('ALIAS', 'DOC_ID'),
-                        help='Add a document alias and exit')
-    parser.add_argument('--tui', action='store_true',
-                        help='Launch the rich TUI interface')
-    args = parser.parse_args()
+    arg_parser = argparse.ArgumentParser(description="MyDocBot - terminal note-taker for Google Docs")
+    arg_parser.add_argument('--doc', '-d', type=str, default=None,
+                            help='Start with the given document alias')
+    arg_parser.add_argument('--list', '-l', action='store_true',
+                            help='List configured aliases and exit')
+    arg_parser.add_argument('--add', nargs=2, metavar=('ALIAS', 'DOC_ID'),
+                            help='Add a document alias and exit')
+    arg_parser.add_argument('--tui', action='store_true',
+                            help='Launch the rich TUI interface')
+    args = arg_parser.parse_args()
 
     if args.tui:
         from mydocbot_app import MyDocBotApp
