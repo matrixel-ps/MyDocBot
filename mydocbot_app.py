@@ -378,6 +378,8 @@ class MyDocBotApp(App):
             if pending:
                 parts.append(f"{pending} still pending")
             self.update_status(" | ".join(parts) if parts else "No pending notes.")
+        elif command == '/refresh':
+            self.cmd_refresh()
         elif command == '/tag':
             self.cmd_tag(args)
         elif command == '/config':
@@ -570,6 +572,31 @@ class MyDocBotApp(App):
         self.refresh_ui()
         self.update_status(f"Switched to '{alias}'")
 
+    def cmd_refresh(self):
+        try:
+            title = google_docs.fetch_doc_title(self._service, self.current_doc_id)
+            if title:
+                self.current_title = title
+
+            recent = google_docs.parse_entries(
+                self._service.documents().get(
+                    documentId=self.current_doc_id
+                ).execute(),
+                count=self._history_size
+            )
+
+            existing = {(n["ts"], n["doc_id"]) for n in self.notes_cache}
+            new_count = 0
+            for ts, body in reversed(recent):
+                if (ts, self.current_doc_id) not in existing:
+                    self._add_to_cache(ts, body, self.current_doc_id)
+                    new_count += 1
+
+            self.refresh_ui()
+            self.update_status(f"Loaded {new_count} new note(s)" if new_count else "No new notes")
+        except Exception as e:
+            self.show_error(f"Refresh failed: {e}")
+
     def cmd_tag(self, args):
         if not args:
             self.cmd_tag_list()
@@ -678,6 +705,7 @@ class MyDocBotApp(App):
             "  /current                    Show active doc\n"
             "  /edit                       Open $EDITOR\n"
             "  /flush                      Retry pending offline notes\n"
+            "  /refresh                    Fetch latest notes from API\n"
             "  /search <keyword>           Search notes (session cache)\n"
             "  /tag list                   Show all tags\n"
             "  /tag search <tag>           Find notes by tag\n"
