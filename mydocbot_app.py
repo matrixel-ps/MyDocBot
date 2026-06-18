@@ -143,6 +143,7 @@ class MyDocBotApp(App):
         super().__init__()
         self.svc_config = config.load_config()
         self._service = google_docs.get_service()
+        self._history_size = config.get_history_size(self.svc_config)
         self.current_alias = None
         self.current_doc_id = None
         self.current_title = None
@@ -198,7 +199,7 @@ class MyDocBotApp(App):
                 self._service.documents().get(
                     documentId=self.current_doc_id
                 ).execute(),
-                count=20
+                count=self._history_size
             )
             for ts, body in reversed(recent):
                 self._add_to_cache(ts, body, self.current_doc_id)
@@ -379,6 +380,8 @@ class MyDocBotApp(App):
             self.update_status(" | ".join(parts) if parts else "No pending notes.")
         elif command == '/tag':
             self.cmd_tag(args)
+        elif command == '/config':
+            self.cmd_config(args)
         elif command == '/help':
             self.cmd_help()
         else:
@@ -400,7 +403,7 @@ class MyDocBotApp(App):
         self.notes_cache = [n for n in self.notes_cache if n["doc_id"] != doc_id]
         recent = google_docs.parse_entries(
             self._service.documents().get(documentId=doc_id).execute(),
-            count=20
+            count=self._history_size
         )
         for ts, body in reversed(recent):
             self._add_to_cache(ts, body, doc_id)
@@ -634,23 +637,54 @@ class MyDocBotApp(App):
         preview = self.query_one("#preview-pane")
         preview.update("\n".join(lines))
 
+    def cmd_config(self, args):
+        if not args or args[0] == 'show':
+            history_size = config.get_history_size(self.svc_config)
+            preview = self.query_one("#preview-pane")
+            preview.update(
+                "[b]Config Settings[/b]\n\n"
+                f"  history_size   {history_size}\n"
+                "  [dim](notes loaded on startup / /switch; range 1–500)[/dim]\n\n"
+                "  [dim]Use /config set history_size <n> to change.[/dim]"
+            )
+            return
+        if args[0] == 'set' and len(args) >= 3:
+            key, value = args[1], args[2]
+            if key == 'history_size':
+                valid, msg = validation.validate_history_size(value)
+                if not valid:
+                    self.update_status(f"Invalid: {msg}")
+                    return
+                self.svc_config["history_size"] = int(value)
+                self._history_size = int(value)
+                config.save_config(self.svc_config)
+                self.update_status(
+                    f"history_size set to {value}. Use /switch to reload notes."
+                )
+            else:
+                self.update_status(f"Unknown key '{key}'. Available: history_size")
+        else:
+            self.update_status("Usage: /config show | /config set history_size <1-500>")
+
     def cmd_help(self):
         preview = self.query_one("#preview-pane")
         preview.update(
             "[b]Commands[/b]\n\n"
-            "  /switch <alias>     Switch document\n"
-            "  /list               List documents\n"
-            "  /add <a> <id>       Add document\n"
-            "  /remove <alias>     Remove document\n"
-            "  /rename <o> <n>     Rename alias\n"
-            "  /current            Show active doc\n"
-            "  /edit               Open $EDITOR\n"
-            "  /flush              Retry pending offline notes\n"
-            "  /tag list           Show all tags\n"
-            "  /tag search <tag>   Find notes by tag\n"
-            "  /tag stats          Tag frequency chart\n"
-            "  /search <keyword>   Search notes\n"
-            "  /help               This message\n\n"
+            "  /switch <alias>              Switch document\n"
+            "  /list                        List documents\n"
+            "  /add <a> <id>               Add document\n"
+            "  /remove <alias>             Remove document\n"
+            "  /rename <o> <n>             Rename alias\n"
+            "  /current                    Show active doc\n"
+            "  /edit                       Open $EDITOR\n"
+            "  /flush                      Retry pending offline notes\n"
+            "  /search <keyword>           Search notes (session cache)\n"
+            "  /tag list                   Show all tags\n"
+            "  /tag search <tag>           Find notes by tag\n"
+            "  /tag stats                  Tag frequency chart\n"
+            "  /config show                Show config settings\n"
+            "  /config set history_size    Set notes loaded on startup\n"
+            "  /help                       This message\n\n"
             "[dim]Ctrl+S submit | Ctrl+N notes | Ctrl+P preview | Ctrl+E input[/]"
         )
 

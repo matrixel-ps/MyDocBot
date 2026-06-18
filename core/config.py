@@ -40,3 +40,11 @@ def resolve_alias(config, alias):
     if alias in aliases:
         return aliases[alias]
     return None
+
+
+def get_history_size(config):
+    """Return the configured history_size, defaulting to 20."""
+    try:
+        return int(config.get("history_size", 20))
+    except (ValueError, TypeError):
+        return 20

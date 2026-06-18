@@ -2,6 +2,7 @@ import os
 import shlex
 import shutil
 import subprocess
+import sys
 import tempfile
 from datetime import datetime
 
@@ -227,21 +228,75 @@ def cmd_tag_stats(svc_config, current_doc_id):
         print(f"  #{tag:<18} {count:<5} {bar}")
 
 
+def cmd_search(service, svc_config, current_doc_id, args):
+    if not args:
+        print("Usage: /search <keyword>")
+        return
+    if current_doc_id is None:
+        print("No active document to search.")
+        return
+    keyword = ' '.join(args)
+    history_size = config.get_history_size(svc_config)
+    try:
+        doc = service.documents().get(documentId=current_doc_id).execute()
+        entries = google_docs.parse_entries(doc, count=history_size)
+    except Exception as e:
+        print(f"Error fetching notes for search: {e}", file=sys.stderr)
+        return
+    results = [(ts, body) for ts, body in entries
+               if keyword.lower() in body.lower()]
+    if not results:
+        print(f"No notes matching '{keyword}'")
+        return
+    print(f"Search: {keyword}   ({len(results)} result{'s' if len(results) != 1 else ''})\n")
+    for ts, body in results:
+        preview = body.replace('\n', ' ')[:120]
+        print(f"  {ts} {preview}")
+
+
+def cmd_config(svc_config, args):
+    if not args or args[0] == 'show':
+        history_size = config.get_history_size(svc_config)
+        print("Config settings:")
+        print(f"  history_size   {history_size}   "
+              "(notes loaded on startup / /switch; range 1–500)")
+        return
+    if args[0] == 'set' and len(args) >= 3:
+        key, value = args[1], args[2]
+        if key == 'history_size':
+            valid, msg = validation.validate_history_size(value)
+            if not valid:
+                print(f"Invalid value: {msg}")
+                return
+            svc_config["history_size"] = int(value)
+            config.save_config(svc_config)
+            print(f"--- history_size set to {value}. "
+                  "Takes effect on next /switch or restart. ---")
+        else:
+            print(f"Unknown config key '{key}'. Available keys: history_size")
+    else:
+        print("Usage: /config show | /config set <key> <value>")
+        print("       /config set history_size <1-500>")
+
+
 def cmd_help():
     print("Available commands:")
-    print("  /edit             Open $EDITOR to compose a multi-line note")
-    print("  /switch <alias>   Switch to a different document")
-    print("  /list             List all configured documents")
-    print("  /add <a> <id>     Add a new document alias")
-    print("  /remove <alias>   Remove a document alias")
-    print("  /rename <o> <n>   Rename an alias")
-    print("  /current          Show active document info")
-    print("  /flush            Retry sending pending offline notes")
-    print("  /tag list         Show all indexed tags")
-    print("  /tag search <t>   Find notes by tag")
-    print("  /tag stats        Tag frequency chart")
-    print("  /help             Show this message")
-    print("  exit              Quit the application")
+    print("  /edit                          Open $EDITOR to compose a multi-line note")
+    print("  /switch <alias>                Switch to a different document")
+    print("  /list                          List all configured documents")
+    print("  /add <a> <id>                  Add a new document alias")
+    print("  /remove <alias>                Remove a document alias")
+    print("  /rename <o> <n>                Rename an alias")
+    print("  /current                       Show active document info")
+    print("  /flush                         Retry sending pending offline notes")
+    print("  /search <keyword>              Search recent notes (fetches from API)")
+    print("  /tag list                      Show all indexed tags")
+    print("  /tag search <t> [--since/--until]  Find notes by tag")
+    print("  /tag stats                     Tag frequency chart")
+    print("  /config show                   Show config settings")
+    print("  /config set history_size <n>   Set notes loaded on startup (1-500)")
+    print("  /help                          Show this message")
+    print("  exit                           Quit the application")
 
 
 def dispatch(service, svc_config, line, current_alias, current_doc_id):
@@ -300,6 +355,10 @@ def dispatch(service, svc_config, line, current_alias, current_doc_id):
             print("No pending notes.")
     elif command == '/tag':
         cmd_tag(service, svc_config, args, current_alias, current_doc_id)
+    elif command == '/search':
+        cmd_search(service, svc_config, current_doc_id, args)
+    elif command == '/config':
+        cmd_config(svc_config, args)
     elif command == '/current':
         cmd_current(service, svc_config, current_alias)
     elif command == '/help':

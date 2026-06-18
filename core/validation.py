@@ -1,6 +1,8 @@
 import re
 
 MAX_NOTE_LENGTH = 50 * 1024
+MIN_HISTORY_SIZE = 1
+MAX_HISTORY_SIZE = 500
 
 
 def validate_doc_id(doc_id):
@@ -28,4 +30,15 @@ def validate_note(text):
         return False, "Note cannot be empty"
     if len(text) > MAX_NOTE_LENGTH:
         return False, f"Note exceeds maximum length of {MAX_NOTE_LENGTH // 1024}KB"
+    return True, None
+
+
+def validate_history_size(value):
+    """Validate the history_size config value. Accepts int or string representation."""
+    try:
+        n = int(value)
+    except (ValueError, TypeError):
+        return False, "history_size must be an integer"
+    if n < MIN_HISTORY_SIZE or n > MAX_HISTORY_SIZE:
+        return False, f"history_size must be between {MIN_HISTORY_SIZE} and {MAX_HISTORY_SIZE}"
     return True, None
