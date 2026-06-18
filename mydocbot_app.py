@@ -380,6 +380,8 @@ class MyDocBotApp(App):
             self.update_status(" | ".join(parts) if parts else "No pending notes.")
         elif command == '/refresh':
             self.cmd_refresh()
+        elif command == '/more':
+            self.cmd_more()
         elif command == '/tag':
             self.cmd_tag(args)
         elif command == '/config':
@@ -597,6 +599,41 @@ class MyDocBotApp(App):
         except Exception as e:
             self.show_error(f"Refresh failed: {e}")
 
+    def cmd_more(self):
+        try:
+            doc_notes_count = sum(1 for n in self.notes_cache if n["doc_id"] == self.current_doc_id)
+            fetch_count = min(doc_notes_count + self._history_size, self.MAX_CACHE)
+
+            if fetch_count <= doc_notes_count:
+                self.update_status("All notes loaded (cache full or end of document)")
+                return
+
+            recent = google_docs.parse_entries(
+                self._service.documents().get(
+                    documentId=self.current_doc_id
+                ).execute(),
+                count=fetch_count
+            )
+
+            existing = {(n["ts"], n["doc_id"]) for n in self.notes_cache}
+            new_entries = [(ts, body) for ts, body in recent
+                           if (ts, self.current_doc_id) not in existing]
+
+            if not new_entries:
+                self.update_status("No more notes to load")
+                return
+
+            for ts, body in new_entries:
+                self.notes_cache.append({"ts": ts, "text": body, "doc_id": self.current_doc_id})
+
+            if len(self.notes_cache) > self.MAX_CACHE:
+                self.notes_cache[:] = self.notes_cache[:self.MAX_CACHE]
+
+            self.refresh_ui()
+            self.update_status(f"Loaded {len(new_entries)} more note(s)")
+        except Exception as e:
+            self.show_error(f"Load more failed: {e}")
+
     def cmd_tag(self, args):
         if not args:
             self.cmd_tag_list()
@@ -706,6 +743,7 @@ class MyDocBotApp(App):
             "  /edit                       Open $EDITOR\n"
             "  /flush                      Retry pending offline notes\n"
             "  /refresh                    Fetch latest notes from API\n"
+            "  /more                       Load older notes beyond startup\n"
             "  /search <keyword>           Search notes (session cache)\n"
             "  /tag list                   Show all tags\n"
             "  /tag search <tag>           Find notes by tag\n"
