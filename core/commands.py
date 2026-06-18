@@ -4,6 +4,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import textwrap
 from datetime import datetime
 
 from . import config, google_docs, parser, validation
@@ -61,6 +62,69 @@ def open_editor():
     finally:
         if os.path.exists(tmp_path):
             os.unlink(tmp_path)
+
+
+def export_to_markdown(entries, filepath=None):
+    if filepath is None:
+        filepath = f"export_{datetime.now().strftime('%m%d%y_%H%M')}.md"
+    path = os.path.join(os.getcwd(), filepath)
+    with open(path, 'w') as f:
+        f.write(f"# MyDocBot Export — {datetime.now().strftime('%m/%d/%y %H:%M')}\n\n")
+        for e in entries:
+            ts = e.get("ts", "")
+            text = e.get("text", e.get("preview", ""))
+            f.write(f"## {ts}\n\n{text}\n\n---\n\n")
+    return path
+
+
+def cmd_export(service, svc_config, current_alias, current_doc_id, args):
+    filepath = None
+    tag = None
+    parsed_args = []
+    i = 0
+    while i < len(args):
+        if args[i] == '--file' and i + 1 < len(args):
+            filepath = args[i + 1]
+            i += 2
+        else:
+            parsed_args.append(args[i])
+            i += 1
+
+    if parsed_args:
+        tag = parsed_args[0].lower().lstrip('#')
+
+    if tag:
+        tags = parser.load_tags_index()
+        doc_entries = [e for e in tags.get(tag, []) if e["doc_id"] == current_doc_id]
+        if not doc_entries:
+            print(f"No entries for tag #{tag}")
+            return
+        entries = [{"ts": e["ts"], "text": e["preview"]} for e in doc_entries]
+        try:
+            path = export_to_markdown(entries, filepath)
+            print(f"--- Exported {len(entries)} notes to {path} ---")
+        except OSError as e:
+            print(f"Export failed: {e}")
+    else:
+        if current_doc_id is None:
+            print("No active document to export from.")
+            return
+        history_size = config.get_history_size(svc_config)
+        try:
+            doc = service.documents().get(documentId=current_doc_id).execute()
+            api_entries = google_docs.parse_entries(doc, count=history_size)
+        except Exception as e:
+            print(f"Error fetching notes for export: {e}", file=sys.stderr)
+            return
+        if not api_entries:
+            print("No notes to export.")
+            return
+        entries = [{"ts": ts, "text": textwrap.shorten(body, width=500, placeholder="...")} for ts, body in api_entries]
+        try:
+            path = export_to_markdown(entries, filepath)
+            print(f"--- Exported {len(entries)} notes to {path} ---")
+        except OSError as e:
+            print(f"Export failed: {e}")
 
 
 def cmd_switch(service, svc_config, args, current_alias):
@@ -290,6 +354,7 @@ def cmd_help():
     print("  /current                       Show active document info")
     print("  /flush                         Retry sending pending offline notes")
     print("  /search <keyword>              Search recent notes (fetches from API)")
+    print("  /export [<tag>] [--file <path>]  Export notes to Markdown file")
     print("  /tag list                      Show all indexed tags")
     print("  /tag search <t> [--since/--until]  Find notes by tag")
     print("  /tag stats                     Tag frequency chart")
@@ -357,6 +422,8 @@ def dispatch(service, svc_config, line, current_alias, current_doc_id):
         cmd_tag(service, svc_config, args, current_alias, current_doc_id)
     elif command == '/search':
         cmd_search(service, svc_config, current_doc_id, args)
+    elif command == '/export':
+        cmd_export(service, svc_config, current_alias, current_doc_id, args)
     elif command == '/config':
         cmd_config(svc_config, args)
     elif command == '/current':

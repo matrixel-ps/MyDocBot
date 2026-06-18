@@ -11,7 +11,7 @@ from textual.containers import Horizontal
 from textual.widgets import Button, Label, ListItem, ListView, Static, TextArea
 
 from core import config, google_docs, parser, validation
-from core.commands import resolve_editor
+from core.commands import export_to_markdown, resolve_editor
 
 CSS = """
 Screen {
@@ -382,6 +382,8 @@ class MyDocBotApp(App):
             self.cmd_refresh()
         elif command == '/more':
             self.cmd_more()
+        elif command == '/export':
+            self.cmd_export(args)
         elif command == '/tag':
             self.cmd_tag(args)
         elif command == '/config':
@@ -634,6 +636,44 @@ class MyDocBotApp(App):
         except Exception as e:
             self.show_error(f"Load more failed: {e}")
 
+    def cmd_export(self, args):
+        filepath = None
+        tag = None
+        i = 0
+        while i < len(args):
+            if args[i] == '--file' and i + 1 < len(args):
+                filepath = args[i + 1]
+                i += 2
+            else:
+                if tag is None:
+                    tag = args[i]
+                i += 1
+
+        if tag:
+            tag = tag.lower().lstrip('#')
+            tags = parser.load_tags_index()
+            doc_entries = [e for e in tags.get(tag, []) if e["doc_id"] == self.current_doc_id]
+            if not doc_entries:
+                self.update_status(f"No entries for tag #{tag}")
+                return
+            entries = [{"ts": e["ts"], "text": e["preview"]} for e in doc_entries]
+            try:
+                path = export_to_markdown(entries, filepath)
+                self.update_status(f"Exported {len(entries)} notes to {path}")
+            except OSError as e:
+                self.show_error(f"Export failed: {e}")
+        else:
+            doc_entries = [{"ts": n["ts"], "text": n["text"]}
+                           for n in self.notes_cache if n["doc_id"] == self.current_doc_id]
+            if not doc_entries:
+                self.update_status("No notes in cache to export.")
+                return
+            try:
+                path = export_to_markdown(doc_entries, filepath)
+                self.update_status(f"Exported {len(doc_entries)} notes to {path}")
+            except OSError as e:
+                self.show_error(f"Export failed: {e}")
+
     def cmd_tag(self, args):
         if not args:
             self.cmd_tag_list()
@@ -744,6 +784,7 @@ class MyDocBotApp(App):
             "  /flush                      Retry pending offline notes\n"
             "  /refresh                    Fetch latest notes from API\n"
             "  /more                       Load older notes beyond startup\n"
+            "  /export [<tag>] [--file]     Export notes to Markdown file\n"
             "  /search <keyword>           Search notes (session cache)\n"
             "  /tag list                   Show all tags\n"
             "  /tag search <tag>           Find notes by tag\n"
