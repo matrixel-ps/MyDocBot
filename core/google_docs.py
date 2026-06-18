@@ -1,5 +1,5 @@
-import asyncio
 import os
+import re
 import sys
 import time
 
@@ -82,42 +82,6 @@ def prepend_text(service, doc_id, text):
         return False
 
 
-class AsyncGoogleDocs:
-    def __init__(self):
-        self._service = get_service()
-
-    async def _run(self, fn):
-        loop = asyncio.get_event_loop()
-        return await loop.run_in_executor(None, fn)
-
-    async def prepend_text(self, doc_id, text):
-        body = {
-            'requests': [{
-                'insertText': {
-                    'location': {'index': 1},
-                    'text': f"{text}\n\n"
-                }
-            }]
-        }
-        await self._run(
-            lambda: self._service.documents().batchUpdate(
-                documentId=doc_id, body=body
-            ).execute()
-        )
-
-    async def fetch_doc_title(self, doc_id):
-        doc = await self._run(
-            lambda: self._service.documents().get(documentId=doc_id).execute()
-        )
-        return doc.get('title', '(untitled)')
-
-    async def fetch_recent_notes(self, doc_id, count=2):
-        doc = await self._run(
-            lambda: self._service.documents().get(documentId=doc_id).execute()
-        )
-        return parse_entries(doc, count)
-
-
 def parse_entries(doc, count=2):
     content = doc.get('body', {}).get('content', [])
     full_text = []
@@ -130,7 +94,6 @@ def parse_entries(doc, count=2):
             if run:
                 full_text.append(run.get('content', ''))
     text = ''.join(full_text)
-    import re
     parts = re.split(r'(?=\[\d{2}/\d{2}/\d{2}\])', text)
     entries = []
     for part in parts:
