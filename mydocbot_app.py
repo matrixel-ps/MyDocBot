@@ -1,7 +1,5 @@
 import os
 import re
-import shlex
-import shutil
 import subprocess
 import tempfile
 import textwrap
@@ -13,6 +11,7 @@ from textual.containers import Horizontal
 from textual.widgets import Button, Label, ListItem, ListView, Static, TextArea
 
 from core import config, google_docs, parser, validation
+from core.commands import resolve_editor
 
 CSS = """
 Screen {
@@ -143,7 +142,7 @@ class MyDocBotApp(App):
     def __init__(self):
         super().__init__()
         self.svc_config = config.load_config()
-        self.docs = google_docs.AsyncGoogleDocs()
+        self._service = google_docs.get_service()
         self.current_alias = None
         self.current_doc_id = None
         self.current_title = None
@@ -191,12 +190,12 @@ class MyDocBotApp(App):
             default = self.svc_config.get("default", "")
             self.current_alias = default if default in aliases else next(iter(aliases))
             self.current_doc_id = aliases[self.current_alias]
-            self.current_title = google_docs.fetch_doc_title(self.docs._service, self.current_doc_id)
+            self.current_title = google_docs.fetch_doc_title(self._service, self.current_doc_id)
             if not self.current_title:
                 self.current_title = self.current_doc_id[:20] + "..."
 
             recent = google_docs.parse_entries(
-                self.docs._service.documents().get(
+                self._service.documents().get(
                     documentId=self.current_doc_id
                 ).execute(),
                 count=20
@@ -312,10 +311,10 @@ class MyDocBotApp(App):
         timestamp = datetime.now().strftime("[%m/%d/%y] (%H:%M)|")
         entry = f"{timestamp} {text}"
 
-        if google_docs.prepend_text(self.docs._service, self.current_doc_id, entry):
+        if google_docs.prepend_text(self._service, self.current_doc_id, entry):
             parser.index_note(text, timestamp, self.current_doc_id, text)
             self._add_to_cache(timestamp, text, self.current_doc_id)
-            flushed = parser.flush_pending_notes(self.docs._service, self.current_doc_id)
+            flushed = parser.flush_pending_notes(self._service, self.current_doc_id)
             tags = parser.extract_tags(text)
             tag_str = ' '.join(f'#{t}' for t in tags) if tags else '(no tags)'
             status = f"Prepended  |  {tag_str}"
@@ -370,7 +369,7 @@ class MyDocBotApp(App):
         elif command == '/search':
             self.cmd_search(args)
         elif command == '/flush':
-            flushed = parser.flush_pending_notes(self.docs._service)
+            flushed = parser.flush_pending_notes(self._service)
             pending = parser.count_pending()
             parts = []
             if flushed:
@@ -394,13 +393,13 @@ class MyDocBotApp(App):
         if not doc_id:
             self.update_status(f"Unknown alias '{alias}'")
             return
-        title = google_docs.fetch_doc_title(self.docs._service, doc_id)
+        title = google_docs.fetch_doc_title(self._service, doc_id)
         self.current_alias = alias
         self.current_doc_id = doc_id
         self.current_title = title or doc_id[:20] + "..."
         self.notes_cache = [n for n in self.notes_cache if n["doc_id"] != doc_id]
         recent = google_docs.parse_entries(
-            self.docs._service.documents().get(documentId=doc_id).execute(),
+            self._service.documents().get(documentId=doc_id).execute(),
             count=20
         )
         for ts, body in reversed(recent):
@@ -417,7 +416,7 @@ class MyDocBotApp(App):
         lines = []
         for alias, doc_id in aliases.items():
             marker = " ← active" if alias == self.current_alias else ""
-            title = google_docs.fetch_doc_title(self.docs._service, doc_id)
+            title = google_docs.fetch_doc_title(self._service, doc_id)
             display = f'"{title}"' if title else doc_id
             lines.append(f"  {alias:<12} {display}{marker}")
         preview = self.query_one("#preview-pane")
@@ -488,7 +487,7 @@ class MyDocBotApp(App):
         )
 
     def cmd_edit(self):
-        editor_parts = self._resolve_editor()
+        editor_parts = resolve_editor()
         if not editor_parts:
             self.update_status("No editor found. Set $EDITOR.")
             return
@@ -514,10 +513,10 @@ class MyDocBotApp(App):
                 return
             timestamp = datetime.now().strftime("[%m/%d/%y] (%H:%M)|")
             entry = f"{timestamp} {content}"
-            if google_docs.prepend_text(self.docs._service, self.current_doc_id, entry):
+            if google_docs.prepend_text(self._service, self.current_doc_id, entry):
                 parser.index_note(content, timestamp, self.current_doc_id, content)
                 self._add_to_cache(timestamp, content, self.current_doc_id)
-                flushed = parser.flush_pending_notes(self.docs._service, self.current_doc_id)
+                flushed = parser.flush_pending_notes(self._service, self.current_doc_id)
                 status = "Prepended editor content"
                 if flushed:
                     status += f" (flushed {flushed})"
@@ -561,7 +560,7 @@ class MyDocBotApp(App):
             return
         alias = next(iter(aliases))
         doc_id = aliases[alias]
-        title = google_docs.fetch_doc_title(self.docs._service, doc_id)
+        title = google_docs.fetch_doc_title(self._service, doc_id)
         self.current_alias = alias
         self.current_doc_id = doc_id
         self.current_title = title or doc_id[:20] + "..."
@@ -655,14 +654,4 @@ class MyDocBotApp(App):
             "[dim]Ctrl+S submit | Ctrl+N notes | Ctrl+P preview | Ctrl+E input[/]"
         )
 
-    def _resolve_editor(self):
-        editor = os.environ.get('EDITOR')
-        if editor:
-            parts = shlex.split(editor)
-            if shutil.which(parts[0]):
-                return parts
-        for candidate in ['vim', 'nano', 'vi']:
-            path = shutil.which(candidate)
-            if path:
-                return [path]
-        return None
+

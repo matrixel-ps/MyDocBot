@@ -8,7 +8,7 @@ from datetime import datetime
 from . import config, google_docs, parser, validation
 
 
-def _resolve_editor():
+def resolve_editor():
     editor = os.environ.get('EDITOR')
     if editor:
         parts = shlex.split(editor)
@@ -22,7 +22,7 @@ def _resolve_editor():
 
 
 def open_editor():
-    editor_parts = _resolve_editor()
+    editor_parts = resolve_editor()
     if not editor_parts:
         print("No editor found. Set $EDITOR or install vim/nano.")
         return None

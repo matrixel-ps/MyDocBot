@@ -25,24 +25,31 @@ def main():
     svc_config = config.load_config()
     aliases = svc_config.get("aliases", {})
 
-    if not aliases:
-        print("No documents configured. Add one with:")
-        print("  python main.py --add <alias> <doc_id>")
-        return
-
     if args.list:
-        for alias, doc_id in aliases.items():
-            print(f"  {alias:<12} {doc_id}")
+        if not aliases:
+            print("No documents configured.")
+        else:
+            for alias, doc_id in aliases.items():
+                print(f"  {alias:<12} {doc_id}")
         return
 
     if args.add:
         alias, doc_id = args.add
+        valid, vmsg = validation.validate_doc_id(doc_id)
+        if not valid:
+            print(f"Invalid doc_id: {vmsg}")
+            return
         if alias in aliases:
             print(f"Alias '{alias}' already exists.")
             return
         aliases[alias] = doc_id
         config.save_config(svc_config)
         print(f"Added alias '{alias}' ({doc_id}).")
+        return
+
+    if not aliases:
+        print("No documents configured. Add one with:")
+        print("  python main.py --add <alias> <doc_id>")
         return
 
     service = google_docs.get_service()

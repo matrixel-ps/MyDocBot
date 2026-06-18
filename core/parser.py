@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import sys
 import textwrap
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
@@ -15,11 +16,15 @@ def extract_tags(text):
 def load_tags_index():
     if not os.path.exists(TAGS_INDEX_PATH):
         return {}
-    with open(TAGS_INDEX_PATH) as f:
-        content = f.read().strip()
-        if not content:
-            return {}
-        return json.loads(content)
+    try:
+        with open(TAGS_INDEX_PATH) as f:
+            content = f.read().strip()
+            if not content:
+                return {}
+            return json.loads(content)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"Warning: Corrupt tags index at {TAGS_INDEX_PATH} — {e}. Starting fresh.", file=sys.stderr)
+        return {}
 
 
 def save_tags_index(index):
@@ -72,11 +77,15 @@ def parse_date_flags(args):
 def load_pending_notes():
     if not os.path.exists(PENDING_PATH):
         return []
-    with open(PENDING_PATH) as f:
-        content = f.read().strip()
-        if not content:
-            return []
-        return json.loads(content)
+    try:
+        with open(PENDING_PATH) as f:
+            content = f.read().strip()
+            if not content:
+                return []
+            return json.loads(content)
+    except (json.JSONDecodeError, OSError) as e:
+        print(f"Warning: Corrupt pending queue at {PENDING_PATH} — {e}. Discarding.", file=sys.stderr)
+        return []
 
 
 def save_pending_notes(queue):
@@ -122,11 +131,19 @@ def flush_pending_notes(service, doc_id=None):
 def filter_tag_entries_by_date(entries, since=None, until=None):
     if not since and not until:
         return entries
-    since_tuple = _parse_date(since) if since else None
-    until_tuple = _parse_date(until) if until else None
+    try:
+        since_tuple = _parse_date(since) if since else None
+        until_tuple = _parse_date(until) if until else None
+    except (ValueError, IndexError):
+        print("Warning: invalid date filter (expected MM/DD/YY)", file=sys.stderr)
+        return entries
     result = []
     for e in entries:
-        date_tuple = _parse_date(e["ts"][1:9])
+        try:
+            date_tuple = _parse_date(e["ts"][1:9])
+        except (ValueError, IndexError):
+            print(f"Warning: skipping entry with malformed timestamp: {e.get('ts', '')!r}", file=sys.stderr)
+            continue
         if since_tuple and date_tuple < since_tuple:
             continue
         if until_tuple and date_tuple > until_tuple:

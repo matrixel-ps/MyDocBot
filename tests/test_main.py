@@ -168,6 +168,47 @@ class TestMainPromptShowsPending:
         mock_pending.assert_called()
 
 
+class TestMainAddFlag:
+    """Verify --add argparse flag validates doc_id (Fix 1)."""
+
+    def _run_add(self, alias, doc_id, *, capsys):
+        import main
+        with patch.object(sys, 'argv', ['main.py', '--add', alias, doc_id]):
+            with patch('main.config.load_config', return_value={
+                "default": "", "aliases": {}
+            }):
+                with patch('main.config.save_config') as mock_save:
+                    main.main()
+        return mock_save, capsys.readouterr()
+
+    def test_valid_doc_id_is_added(self, capsys):
+        mock_save, captured = self._run_add("mynotes", "validDocId123456789", capsys=capsys)
+        mock_save.assert_called_once()
+        assert "Added alias" in captured.out
+
+    def test_invalid_doc_id_rejected(self, capsys):
+        mock_save, captured = self._run_add("bad", "short", capsys=capsys)
+        mock_save.assert_not_called()
+        assert "Invalid doc_id" in captured.out
+
+    def test_invalid_doc_id_with_special_chars_rejected(self, capsys):
+        mock_save, captured = self._run_add("bad", "doc!@#$%^invalid", capsys=capsys)
+        mock_save.assert_not_called()
+        assert "Invalid doc_id" in captured.out
+
+    def test_duplicate_alias_rejected(self, capsys):
+        import main
+        with patch.object(sys, 'argv', ['main.py', '--add', 'log', 'validDocId123456789']):
+            with patch('main.config.load_config', return_value={
+                "default": "log", "aliases": {"log": "existingDocId123456"}
+            }):
+                with patch('main.config.save_config') as mock_save:
+                    main.main()
+        out = capsys.readouterr().out
+        mock_save.assert_not_called()
+        assert "already exists" in out
+
+
 class TestMainIndexNoteArgs:
     """Verify index_note is called with correct arguments."""
 

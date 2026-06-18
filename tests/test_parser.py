@@ -317,6 +317,30 @@ class TestFilterTagEntriesByDate:
         result = prs.filter_tag_entries_by_date([], since="06/01/26")
         assert result == []
 
+    def test_malformed_entry_ts_is_skipped(self, capsys):
+        """Entries with corrupt timestamps are skipped, not crashes (Fix 5)."""
+        entries = [
+            {"ts": "BADTS", "doc_id": "d1", "preview": "corrupt"},
+            {"ts": "[06/15/26] (10:00)|", "doc_id": "d1", "preview": "valid"},
+        ]
+        result = prs.filter_tag_entries_by_date(entries, since="06/01/26")
+        assert len(result) == 1
+        assert result[0]["preview"] == "valid"
+        assert "Warning" in capsys.readouterr().err
+
+    def test_malformed_entry_ts_skipped_no_crash_empty_ts(self, capsys):
+        """Entry with empty ts does not raise."""
+        entries = [{"ts": "", "doc_id": "d1", "preview": "no ts"}]
+        result = prs.filter_tag_entries_by_date(entries, since="06/01/26")
+        assert result == []
+
+    def test_invalid_since_filter_returns_all(self, capsys):
+        """Malformed --since date string falls back to returning all entries."""
+        entries = [{"ts": "[06/15/26] (10:00)|", "doc_id": "d1", "preview": "ok"}]
+        result = prs.filter_tag_entries_by_date(entries, since="not-a-date")
+        assert len(result) == 1
+        assert "Warning" in capsys.readouterr().err
+
 
 class TestParseDateFlags:
     def test_no_flags(self):
@@ -371,3 +395,56 @@ class TestPendingQueue:
     def test_flush_empty_queue(self, tmp_pending_path, mock_service):
         result = prs.flush_pending_notes(mock_service)
         assert result == 0
+
+
+class TestLoadTagsIndexCorrupt:
+    """load_tags_index() must handle corrupt JSON gracefully (Fix 2)."""
+
+    def test_corrupt_json_returns_empty(self, tmp_tags_index_path):
+        with open(tmp_tags_index_path, 'w') as f:
+            f.write("{not valid json!!!")
+        result = prs.load_tags_index()
+        assert result == {}
+
+    def test_corrupt_json_prints_warning(self, tmp_tags_index_path, capsys):
+        with open(tmp_tags_index_path, 'w') as f:
+            f.write("}{broken")
+        prs.load_tags_index()
+        assert "Warning" in capsys.readouterr().err
+
+    def test_empty_file_returns_empty(self, tmp_tags_index_path):
+        with open(tmp_tags_index_path, 'w') as f:
+            f.write("")
+        assert prs.load_tags_index() == {}
+
+    def test_valid_file_still_loads(self, tmp_tags_index_path):
+        prs.save_tags_index({"bug": [{"ts": "t1", "doc_id": "d1", "preview": "p"}]})
+        result = prs.load_tags_index()
+        assert "bug" in result
+
+
+class TestLoadPendingNotesCorrupt:
+    """load_pending_notes() must handle corrupt JSON gracefully (Fix 2)."""
+
+    def test_corrupt_json_returns_empty(self, tmp_pending_path):
+        with open(tmp_pending_path, 'w') as f:
+            f.write("[not valid json!!!")
+        result = prs.load_pending_notes()
+        assert result == []
+
+    def test_corrupt_json_prints_warning(self, tmp_pending_path, capsys):
+        with open(tmp_pending_path, 'w') as f:
+            f.write("][broken")
+        prs.load_pending_notes()
+        assert "Warning" in capsys.readouterr().err
+
+    def test_empty_file_returns_empty(self, tmp_pending_path):
+        with open(tmp_pending_path, 'w') as f:
+            f.write("")
+        assert prs.load_pending_notes() == []
+
+    def test_valid_file_still_loads(self, tmp_pending_path):
+        prs.queue_note("hello", "doc_1", "t1")
+        result = prs.load_pending_notes()
+        assert len(result) == 1
+        assert result[0]["text"] == "hello"
