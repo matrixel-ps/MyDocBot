@@ -8,7 +8,7 @@ from datetime import datetime, timedelta
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
-from textual.widgets import Button, Label, ListItem, ListView, Static, TextArea
+from textual.widgets import Button, Label, ListItem, ListView, RichLog, Static, TextArea
 
 from core import config, google_docs, parser, validation
 from core.commands import export_to_markdown, resolve_editor
@@ -126,8 +126,30 @@ class DateSeparator(ListItem):
         self._is_separator = True
 
 
+class PreviewPane(RichLog):
+    def _on_key(self, event):
+        key = event.key
+        if key == "up":
+            self.scroll_up(animate=False)
+        elif key == "down":
+            self.scroll_down(animate=False)
+        elif key == "pageup":
+            self.scroll_page_up(animate=False)
+        elif key == "pagedown":
+            self.scroll_page_down(animate=False)
+        elif key == "home":
+            self.scroll_home(animate=False)
+        elif key == "end":
+            self.scroll_end(animate=False)
+        else:
+            super()._on_key(event)
+            return
+        event.stop()
+
+
 class MyDocBotApp(App):
     CSS = CSS
+    ENABLE_COMMAND_PALETTE = False
 
     BINDINGS = [
         Binding("ctrl+n", "focus_notes", "Notes"),
@@ -172,13 +194,15 @@ class MyDocBotApp(App):
         yield Static("Connecting...", id="header-bar")
         with Horizontal(id="main-area"):
             yield ListView(id="notes-list")
-            yield Static("Select a note to preview", id="preview-pane")
+            yield PreviewPane(id="preview-pane", max_lines=None, highlight=False, wrap=True)
         with Horizontal(id="input-area"):
             yield TextArea(id="input-bar", text="", placeholder="Type a note... (Ctrl+S to submit)")
             yield Button("Submit", id="submit-btn", variant="primary")
         yield Static("Initializing...", id="status-bar")
 
     def on_mount(self):
+        preview = self.query_one("#preview-pane")
+        preview.write("Select a note to preview")
         self.init_app()
 
     def init_app(self):
@@ -286,7 +310,9 @@ class MyDocBotApp(App):
             r'[bold #f9e2af]\1[/]',
             text
         )
-        preview.update(f"[#a6e3a1]{ts}[/]\n\n{highlighted}")
+        preview.clear()
+        preview.write(f"[#a6e3a1]{ts}[/]\n\n{highlighted}")
+        preview.refresh()
         preview.scroll_home(animate=False)
 
     def action_submit_note(self):
@@ -429,7 +455,9 @@ class MyDocBotApp(App):
             display = f'"{title}"' if title else doc_id
             lines.append(f"  {alias:<12} {display}{marker}")
         preview = self.query_one("#preview-pane")
-        preview.update("[b]Configured Documents[/b]\n\n" + "\n".join(lines))
+        preview.clear()
+        preview.write("[b]Configured Documents[/b]\n\n" + "\n".join(lines))
+        preview.scroll_home(animate=False)
 
     def cmd_add(self, args):
         if not args or len(args) < 2:
@@ -488,12 +516,14 @@ class MyDocBotApp(App):
 
     def cmd_current(self):
         preview = self.query_one("#preview-pane")
-        preview.update(
+        preview.clear()
+        preview.write(
             f"[b]Active Document[/b]\n\n"
             f"Alias:    {self.current_alias}\n"
             f"Title:    {self.current_title or '(unknown)'}\n"
             f"Doc ID:   {self.current_doc_id}"
         )
+        preview.scroll_home(animate=False)
 
     def cmd_edit(self):
         editor_parts = resolve_editor()
@@ -556,7 +586,9 @@ class MyDocBotApp(App):
             )
             lines.append(f"[#a6e3a1]{n['ts']}[/] {highlighted}")
         preview = self.query_one("#preview-pane")
-        preview.update("\n".join(lines))
+        preview.clear()
+        preview.write("\n".join(lines))
+        preview.scroll_home(animate=False)
 
     def switch_to_any_doc(self):
         aliases = self.svc_config.get("aliases", {})
@@ -701,7 +733,9 @@ class MyDocBotApp(App):
                           if e["doc_id"] == self.current_doc_id]
             lines.append(f"  #{tag:<20} {len(doc_entries)} notes")
         preview = self.query_one("#preview-pane")
-        preview.update("[b]Tag Index[/b]\n\n" + "\n".join(lines))
+        preview.clear()
+        preview.write("[b]Tag Index[/b]\n\n" + "\n".join(lines))
+        preview.scroll_home(animate=False)
 
     def cmd_tag_search(self, tag, since=None, until=None):
         tags = parser.load_tags_index()
@@ -717,7 +751,9 @@ class MyDocBotApp(App):
         for e in doc_entries:
             lines.append(f"[#a6e3a1]{e['ts']}[/] {e['preview']}")
         preview = self.query_one("#preview-pane")
-        preview.update("\n".join(lines))
+        preview.clear()
+        preview.write("\n".join(lines))
+        preview.scroll_home(animate=False)
 
     def cmd_tag_stats(self):
         tags = parser.load_tags_index()
@@ -739,18 +775,22 @@ class MyDocBotApp(App):
             bar = '█' * int(count / max_count * 20) if max_count else ''
             lines.append(f"  #{tag:<20} {bar} {count}")
         preview = self.query_one("#preview-pane")
-        preview.update("\n".join(lines))
+        preview.clear()
+        preview.write("\n".join(lines))
+        preview.scroll_home(animate=False)
 
     def cmd_config(self, args):
         if not args or args[0] == 'show':
             history_size = config.get_history_size(self.svc_config)
             preview = self.query_one("#preview-pane")
-            preview.update(
+            preview.clear()
+            preview.write(
                 "[b]Config Settings[/b]\n\n"
                 f"  history_size   {history_size}\n"
                 "  [dim](notes loaded on startup / /switch; range 1–500)[/dim]\n\n"
                 "  [dim]Use /config set history_size <n> to change.[/dim]"
             )
+            preview.scroll_home(animate=False)
             return
         if args[0] == 'set' and len(args) >= 3:
             key, value = args[1], args[2]
@@ -772,7 +812,8 @@ class MyDocBotApp(App):
 
     def cmd_help(self):
         preview = self.query_one("#preview-pane")
-        preview.update(
+        preview.clear()
+        preview.write(
             "[b]Commands[/b]\n\n"
             "  /switch <alias>              Switch document\n"
             "  /list                        List documents\n"
@@ -792,7 +833,8 @@ class MyDocBotApp(App):
             "  /config show                Show config settings\n"
             "  /config set history_size    Set notes loaded on startup\n"
             "  /help                       This message\n\n"
-            "[dim]Ctrl+S submit | Ctrl+N notes | Ctrl+P preview | Ctrl+E input[/]"
+            "[dim]Ctrl+S submit | Ctrl+N notes | Ctrl+P preview | Ctrl+E input | Tab cycle[/]"
         )
+        preview.scroll_home(animate=False)
 
 
