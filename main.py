@@ -15,7 +15,14 @@ def main():
                             help='Add a document alias and exit')
     arg_parser.add_argument('--tui', action='store_true',
                             help='Launch the rich TUI interface')
+    arg_parser.add_argument('--read', '-r', nargs='?', const='', default=None,
+                            help='Launch read-only TUI (optional: start alias)')
     args = arg_parser.parse_args()
+
+    if args.read is not None:
+        from mydocbot_app import ReadOnlyApp
+        ReadOnlyApp(start_alias=args.read or None).run()
+        return
 
     if args.tui:
         from mydocbot_app import MyDocBotApp
