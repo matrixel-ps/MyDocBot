@@ -82,6 +82,49 @@ def prepend_text(service, doc_id, text):
         return False
 
 
+def parse_entries_readable(doc, count=2):
+    content = doc.get('body', {}).get('content', [])
+    full_text = []
+    for elem in content:
+        para = elem.get('paragraph')
+        if not para:
+            continue
+        for el in para.get('elements', []):
+            run = el.get('textRun')
+            if run:
+                full_text.append(run.get('content', ''))
+    text = ''.join(full_text).replace('\r\n', '\n').replace('\r', '\n')
+
+    parts = re.split(
+        r'(?=^\d{1,2}/\d{1,2}/\d{4}\n\[\d{1,2}\.\d{1,2}\]$)',
+        text.strip(),
+        flags=re.MULTILINE
+    )
+    entries = []
+    for part in parts:
+        part = part.strip()
+        if not part:
+            continue
+        lines = part.split('\n')
+        if len(lines) < 2:
+            continue
+        date_line = lines[0].strip()
+        time_line = lines[1].strip()
+        body = '\n'.join(lines[2:]).strip()
+
+        date_match = re.match(r'^(\d{1,2})/(\d{1,2})/(\d{4})$', date_line)
+        if not date_match:
+            continue
+        time_match = re.match(r'^\[(\d{1,2})\.(\d{1,2})\]', time_line)
+        if not time_match:
+            continue
+
+        ts = f"[{date_line}] [{time_match.group(1)}.{time_match.group(2)}]|"
+        entries.append((ts, body))
+
+    return entries[:count]
+
+
 def parse_entries(doc, count=2):
     content = doc.get('body', {}).get('content', [])
     full_text = []
