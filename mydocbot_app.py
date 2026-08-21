@@ -5,6 +5,7 @@ import tempfile
 import textwrap
 from datetime import datetime, timedelta
 
+from rich.markup import escape as md_escape
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
@@ -12,6 +13,10 @@ from textual.widgets import Button, Label, ListItem, ListView, RichLog, Static, 
 
 from core import config, google_docs, parser, validation
 from core.commands import export_to_markdown, resolve_editor
+
+# Maximum number of notes kept in the in-memory session cache (per app instance),
+# shared by both MyDocBotApp and ReadOnlyApp to avoid unbounded memory growth.
+NOTES_CACHE_LIMIT = 500
 
 CSS = """
 Screen {
@@ -110,7 +115,7 @@ class NoteItem(ListItem):
         time_part = timestamp[12:17] if len(timestamp) >= 17 else timestamp
         tags = parser.extract_tags(text)
         tag_str = f"  [#a6e3a1]{' '.join(f'#{t}' for t in tags[:3])}[/]" if tags else ""
-        label = Label(f"[{time_part}] {preview}{tag_str}")
+        label = Label(f"[{md_escape(time_part)}] {md_escape(preview)}{tag_str}")
         super().__init__(label)
         self.note_ts = timestamp
         self.note_text = text
@@ -147,23 +152,38 @@ class PreviewPane(RichLog):
         event.stop()
 
 
-class MyDocBotApp(App):
+class BaseNotesApp(App):
+    """Shared foundation for MyDocBotApp (read/write) and ReadOnlyApp.
+
+    Holds all state and behavior that is identical between the two Textual
+    apps: notes cache management, date-grouped list rendering, preview pane
+    rendering, and the handful of commands whose logic is the same in both
+    modes (/switch, /list, /add, /current, /search, /refresh, /more).
+
+    Subclasses plug in the handful of genuine differences via a small hook
+    interface (config file, alias resolution, entry parsing, date-key
+    extraction) plus a few text/label class attributes. Everything that is
+    *not* identical between the two apps on purpose (BINDINGS, compose(),
+    handle_command()'s command table, /help text, and write-only commands
+    like /edit /remove /rename /export /tag /config) intentionally stays in
+    the subclasses rather than being forced into hooks here.
+    """
+
     CSS = CSS
     ENABLE_COMMAND_PALETTE = False
+    MAX_CACHE = NOTES_CACHE_LIMIT
 
-    BINDINGS = [
-        Binding("ctrl+n", "focus_notes", "Notes"),
-        Binding("ctrl+p", "focus_preview", "Preview"),
-        Binding("ctrl+e", "focus_input", "Input"),
-        Binding("escape", "focus_input", "Back"),
-        Binding("ctrl+s", "submit_note", "Submit"),
-    ]
-
-    MAX_CACHE = 500
+    # ---- text/label differences, overridden per subclass ----
+    HEADER_TITLE = "MyDocBot"
+    EMPTY_NOTES_MSG = "No notes yet."
+    LIST_HEADER = "Documents"
+    NO_DOCS_MSG = "No docs configured."
+    NO_DOCS_LIST_MSG = "No docs configured."
+    ADD_SUCCESS_SUFFIX = ""
 
     def __init__(self):
         super().__init__()
-        self.svc_config = config.load_config()
+        self.svc_config = self._load_config()
         self._service = google_docs.get_service()
         self._history_size = config.get_history_size(self.svc_config)
         self.current_alias = None
@@ -174,6 +194,31 @@ class MyDocBotApp(App):
         self._last_selected_index = 0
         self._note_to_display = {}
 
+    # ---- hooks subclasses must implement ----
+    def _load_config(self):
+        raise NotImplementedError
+
+    def _save_config(self, cfg):
+        raise NotImplementedError
+
+    def _resolve_alias(self, cfg, alias):
+        raise NotImplementedError
+
+    def _fetch_recent(self, doc_id, count):
+        """Fetch up to `count` most-recent (ts, body) entries for doc_id."""
+        raise NotImplementedError
+
+    def _date_key(self, ts):
+        """Return a canonical 'MM/DD/YY' string for grouping/labeling a note's
+        timestamp, comparable against `_format_date_header`'s own
+        `datetime.now().strftime("%m/%d/%y")` computation."""
+        raise NotImplementedError
+
+    def _resolve_initial_alias(self, aliases):
+        default = self.svc_config.get("default", "")
+        return default if default in aliases else next(iter(aliases))
+
+    # ---- shared cache/date helpers ----
     def _add_to_cache(self, ts, text, doc_id):
         self.notes_cache.insert(0, {"ts": ts, "text": text, "doc_id": doc_id})
         if len(self.notes_cache) > self.MAX_CACHE:
@@ -190,16 +235,7 @@ class MyDocBotApp(App):
         month, day, year = date_str.split("/")
         return f"{month}/{day}/{year}"
 
-    def compose(self) -> ComposeResult:
-        yield Static("Connecting...", id="header-bar")
-        with Horizontal(id="main-area"):
-            yield ListView(id="notes-list")
-            yield PreviewPane(id="preview-pane", max_lines=None, highlight=False, wrap=True)
-        with Horizontal(id="input-area"):
-            yield TextArea(id="input-bar", text="", placeholder="Type a note... (Ctrl+S to submit)")
-            yield Button("Submit", id="submit-btn", variant="primary")
-        yield Static("Initializing...", id="status-bar")
-
+    # ---- lifecycle ----
     def on_mount(self):
         preview = self.query_one("#preview-pane")
         preview.write("Select a note to preview")
@@ -209,22 +245,16 @@ class MyDocBotApp(App):
         try:
             aliases = self.svc_config.get("aliases", {})
             if not aliases:
-                self.show_error("No docs configured. Use CLI --add first.")
+                self.show_error(self.NO_DOCS_MSG)
                 return
 
-            default = self.svc_config.get("default", "")
-            self.current_alias = default if default in aliases else next(iter(aliases))
+            self.current_alias = self._resolve_initial_alias(aliases)
             self.current_doc_id = aliases[self.current_alias]
             self.current_title = google_docs.fetch_doc_title(self._service, self.current_doc_id)
             if not self.current_title:
                 self.current_title = self.current_doc_id[:20] + "..."
 
-            recent = google_docs.parse_entries(
-                self._service.documents().get(
-                    documentId=self.current_doc_id
-                ).execute(),
-                count=self._history_size
-            )
+            recent = self._fetch_recent(self.current_doc_id, self._history_size)
             for ts, body in reversed(recent):
                 self._add_to_cache(ts, body, self.current_doc_id)
 
@@ -241,9 +271,9 @@ class MyDocBotApp(App):
 
     def refresh_ui(self):
         header = self.query_one("#header-bar")
-        doc_display = f"[bold]{self.current_alias}[/] [italic]{self.current_title}[/]"
+        doc_display = f"[bold]{md_escape(self.current_alias or '')}[/] [italic]{md_escape(self.current_title or '')}[/]"
         status = "● Connected"
-        header.update(f"[b]MyDocBot[/b]     {doc_display}     {status}")
+        header.update(f"[b]{self.HEADER_TITLE}[/b]     {doc_display}     {status}")
 
         notes_list = self.query_one("#notes-list")
         notes_list.clear()
@@ -251,7 +281,7 @@ class MyDocBotApp(App):
 
         if not doc_notes:
             notes_list.append(
-                ListItem(Label("[#585b70]No notes yet. Type something and submit![/]"))
+                ListItem(Label(f"[#585b70]{self.EMPTY_NOTES_MSG}[/]"))
             )
             self.update_status("Ready")
             return
@@ -262,10 +292,10 @@ class MyDocBotApp(App):
         display_idx = 0
 
         for n in doc_notes:
-            date_part = n["ts"][1:9]
-            if date_part != current_date:
-                current_date = date_part
-                notes_list.append(DateSeparator(self._format_date_header(date_part)))
+            date_key = self._date_key(n["ts"])
+            if date_key != current_date:
+                current_date = date_key
+                notes_list.append(DateSeparator(self._format_date_header(date_key)))
                 display_idx += 1
             item = NoteItem(n["ts"], n["text"], n["doc_id"])
             notes_list.append(item)
@@ -308,12 +338,216 @@ class MyDocBotApp(App):
         highlighted = re.sub(
             r'(#\w+)',
             r'[bold #f9e2af]\1[/]',
-            text
+            md_escape(text)
         )
         preview.clear()
-        preview.write(f"[#a6e3a1]{ts}[/]\n\n{highlighted}")
+        preview.write(f"[#a6e3a1]{md_escape(ts)}[/]\n\n{highlighted}")
         preview.refresh()
         preview.scroll_home(animate=False)
+
+    def update_status(self, msg):
+        status_bar = self.query_one("#status-bar")
+        status_bar.update(msg)
+
+    def show_error(self, msg):
+        status_bar = self.query_one("#status-bar")
+        status_bar.update(f"[#f38ba8]{md_escape(str(msg))}[/]")
+
+    def action_focus_notes(self):
+        self.query_one("#notes-list").focus()
+
+    def action_focus_preview(self):
+        self.query_one("#preview-pane").focus()
+
+    # ---- shared commands ----
+    def cmd_switch(self, args):
+        if not args:
+            self.update_status("Usage: /switch <alias>")
+            return
+        alias = args[0]
+        doc_id = self._resolve_alias(self.svc_config, alias)
+        if not doc_id:
+            self.update_status(f"Unknown alias '{alias}'")
+            return
+        title = google_docs.fetch_doc_title(self._service, doc_id)
+        self.current_alias = alias
+        self.current_doc_id = doc_id
+        self.current_title = title or doc_id[:20] + "..."
+        self.notes_cache = [n for n in self.notes_cache if n["doc_id"] != doc_id]
+        recent = self._fetch_recent(doc_id, self._history_size)
+        for ts, body in reversed(recent):
+            self._add_to_cache(ts, body, doc_id)
+        self._last_selected_index = 0
+        self.refresh_ui()
+        self.update_status(f"Switched to '{md_escape(alias)}' ({md_escape(title or doc_id)})")
+
+    def cmd_list(self):
+        aliases = self.svc_config.get("aliases", {})
+        if not aliases:
+            self.update_status(self.NO_DOCS_LIST_MSG)
+            return
+        lines = []
+        for alias, doc_id in aliases.items():
+            marker = " ← active" if alias == self.current_alias else ""
+            title = google_docs.fetch_doc_title(self._service, doc_id)
+            display = f'"{md_escape(title)}"' if title else md_escape(doc_id)
+            lines.append(f"  {md_escape(alias):<12} {display}{marker}")
+        preview = self.query_one("#preview-pane")
+        preview.clear()
+        preview.write(f"[b]{self.LIST_HEADER}[/b]\n\n" + "\n".join(lines))
+        preview.scroll_home(animate=False)
+
+    def cmd_add(self, args):
+        if not args or len(args) < 2:
+            self.update_status("Usage: /add <alias> <doc_id>")
+            return
+        alias, doc_id = args[0], args[1]
+        valid, msg = validation.validate_alias(alias)
+        if not valid:
+            self.update_status(f"Invalid alias: {msg}")
+            return
+        valid, msg = validation.validate_doc_id(doc_id)
+        if not valid:
+            self.update_status(f"Invalid doc_id: {msg}")
+            return
+        aliases = self.svc_config.setdefault("aliases", {})
+        if alias in aliases:
+            self.update_status(f"Alias '{alias}' already exists.")
+            return
+        aliases[alias] = doc_id
+        self._save_config(self.svc_config)
+        self.update_status(f"Added '{alias}'{self.ADD_SUCCESS_SUFFIX}")
+
+    def cmd_current(self):
+        preview = self.query_one("#preview-pane")
+        preview.clear()
+        preview.write(
+            f"[b]Active Document[/b]\n\n"
+            f"Alias:    {md_escape(self.current_alias or '')}\n"
+            f"Title:    {md_escape(self.current_title or '(unknown)')}\n"
+            f"Doc ID:   {md_escape(self.current_doc_id or '')}"
+        )
+        preview.scroll_home(animate=False)
+
+    def cmd_search(self, args):
+        if not args:
+            self.update_status("Usage: /search <keyword>")
+            return
+        keyword = ' '.join(args)
+        results = parser.search_cache(self.notes_cache, self.current_doc_id, keyword)
+        if not results:
+            self.update_status(f"No notes matching '{md_escape(keyword)}'")
+            return
+        lines = [f"[b]Search: {md_escape(keyword)}[/]   {len(results)} notes\n"]
+        for n in results:
+            preview_text = n["text"].replace('\n', ' ')[:100]
+            highlighted = re.sub(
+                f'({re.escape(keyword)})', r'[bold #f9e2af]\1[/]',
+                md_escape(preview_text), flags=re.IGNORECASE
+            )
+            lines.append(f"[#a6e3a1]{md_escape(n['ts'])}[/] {highlighted}")
+        preview = self.query_one("#preview-pane")
+        preview.clear()
+        preview.write("\n".join(lines))
+        preview.scroll_home(animate=False)
+
+    def cmd_refresh(self):
+        try:
+            google_docs.invalidate_title_cache(self.current_doc_id)
+            title = google_docs.fetch_doc_title(self._service, self.current_doc_id)
+            if title:
+                self.current_title = title
+
+            recent = self._fetch_recent(self.current_doc_id, self._history_size)
+
+            existing = {(n["ts"], n["doc_id"]) for n in self.notes_cache}
+            new_count = 0
+            for ts, body in reversed(recent):
+                if (ts, self.current_doc_id) not in existing:
+                    self._add_to_cache(ts, body, self.current_doc_id)
+                    new_count += 1
+
+            self.refresh_ui()
+            self.update_status(f"Loaded {new_count} new note(s)" if new_count else "No new notes")
+        except Exception as e:
+            self.show_error(f"Refresh failed: {e}")
+
+    def cmd_more(self):
+        try:
+            doc_notes_count = sum(1 for n in self.notes_cache if n["doc_id"] == self.current_doc_id)
+            fetch_count = min(doc_notes_count + self._history_size, self.MAX_CACHE)
+
+            if fetch_count <= doc_notes_count:
+                self.update_status("All notes loaded (cache full or end of document)")
+                return
+
+            recent = self._fetch_recent(self.current_doc_id, fetch_count)
+
+            existing = {(n["ts"], n["doc_id"]) for n in self.notes_cache}
+            new_entries = [(ts, body) for ts, body in recent
+                           if (ts, self.current_doc_id) not in existing]
+
+            if not new_entries:
+                self.update_status("No more notes to load")
+                return
+
+            for ts, body in new_entries:
+                self.notes_cache.append({"ts": ts, "text": body, "doc_id": self.current_doc_id})
+
+            if len(self.notes_cache) > self.MAX_CACHE:
+                self.notes_cache[:] = self.notes_cache[:self.MAX_CACHE]
+
+            self.refresh_ui()
+            self.update_status(f"Loaded {len(new_entries)} more note(s)")
+        except Exception as e:
+            self.show_error(f"Load more failed: {e}")
+
+
+class MyDocBotApp(BaseNotesApp):
+    BINDINGS = [
+        Binding("ctrl+n", "focus_notes", "Notes"),
+        Binding("ctrl+p", "focus_preview", "Preview"),
+        Binding("ctrl+e", "focus_input", "Input"),
+        Binding("escape", "focus_input", "Back"),
+        Binding("ctrl+s", "submit_note", "Submit"),
+    ]
+
+    HEADER_TITLE = "MyDocBot"
+    EMPTY_NOTES_MSG = "No notes yet. Type something and submit!"
+    LIST_HEADER = "Configured Documents"
+    NO_DOCS_MSG = "No docs configured. Use CLI --add first."
+    NO_DOCS_LIST_MSG = "No documents configured."
+    ADD_SUCCESS_SUFFIX = ""
+
+    def _load_config(self):
+        return config.load_config()
+
+    def _save_config(self, cfg):
+        config.save_config(cfg)
+
+    def _resolve_alias(self, cfg, alias):
+        return config.resolve_alias(cfg, alias)
+
+    def _fetch_recent(self, doc_id, count):
+        return google_docs.parse_entries(
+            self._service.documents().get(documentId=doc_id).execute(),
+            count=count
+        )
+
+    def _date_key(self, ts):
+        # Write timestamps look like "[MM/DD/YY] (HH:MM)|...", so chars 1-8 are
+        # already the "MM/DD/YY" key expected by `_format_date_header`.
+        return ts[1:9]
+
+    def compose(self) -> ComposeResult:
+        yield Static("Connecting...", id="header-bar")
+        with Horizontal(id="main-area"):
+            yield ListView(id="notes-list")
+            yield PreviewPane(id="preview-pane", max_lines=None, highlight=False, wrap=True, markup=True)
+        with Horizontal(id="input-area"):
+            yield TextArea(id="input-bar", text="", placeholder="Type a note... (Ctrl+S to submit)")
+            yield Button("Submit", id="submit-btn", variant="primary")
+        yield Static("Initializing...", id="status-bar")
 
     def action_submit_note(self):
         self.submit_note()
@@ -353,23 +587,9 @@ class MyDocBotApp(App):
             parser.queue_note(text, self.current_doc_id, timestamp)
             self.update_status(f"Offline — queued. {parser.count_pending()} pending. /flush to retry.")
 
-    def update_status(self, msg):
-        status_bar = self.query_one("#status-bar")
-        status_bar.update(msg)
-
-    def show_error(self, msg):
-        status_bar = self.query_one("#status-bar")
-        status_bar.update(f"[#f38ba8]{msg}[/]")
-
     def on_button_pressed(self, event):
         if event.button.id == "submit-btn":
             self.submit_note()
-
-    def action_focus_notes(self):
-        self.query_one("#notes-list").focus()
-
-    def action_focus_preview(self):
-        self.query_one("#preview-pane").focus()
 
     def action_focus_input(self):
         self.query_one("#input-bar").focus()
@@ -419,63 +639,6 @@ class MyDocBotApp(App):
         else:
             self.update_status(f"Unknown: {command}. Type /help")
 
-    def cmd_switch(self, args):
-        if not args:
-            self.update_status("Usage: /switch <alias>")
-            return
-        alias = args[0]
-        doc_id = config.resolve_alias(self.svc_config, alias)
-        if not doc_id:
-            self.update_status(f"Unknown alias '{alias}'")
-            return
-        title = google_docs.fetch_doc_title(self._service, doc_id)
-        self.current_alias = alias
-        self.current_doc_id = doc_id
-        self.current_title = title or doc_id[:20] + "..."
-        self.notes_cache = [n for n in self.notes_cache if n["doc_id"] != doc_id]
-        recent = google_docs.parse_entries(
-            self._service.documents().get(documentId=doc_id).execute(),
-            count=self._history_size
-        )
-        for ts, body in reversed(recent):
-            self._add_to_cache(ts, body, doc_id)
-        self._last_selected_index = 0
-        self.refresh_ui()
-        self.update_status(f"Switched to '{alias}' ({title or doc_id})")
-
-    def cmd_list(self):
-        aliases = self.svc_config.get("aliases", {})
-        if not aliases:
-            self.update_status("No documents configured.")
-            return
-        lines = []
-        for alias, doc_id in aliases.items():
-            marker = " ← active" if alias == self.current_alias else ""
-            title = google_docs.fetch_doc_title(self._service, doc_id)
-            display = f'"{title}"' if title else doc_id
-            lines.append(f"  {alias:<12} {display}{marker}")
-        preview = self.query_one("#preview-pane")
-        preview.clear()
-        preview.write("[b]Configured Documents[/b]\n\n" + "\n".join(lines))
-        preview.scroll_home(animate=False)
-
-    def cmd_add(self, args):
-        if not args or len(args) < 2:
-            self.update_status("Usage: /add <alias> <doc_id>")
-            return
-        alias, doc_id = args[0], args[1]
-        valid, msg = validation.validate_doc_id(doc_id)
-        if not valid:
-            self.update_status(f"Invalid doc_id: {msg}")
-            return
-        aliases = self.svc_config.setdefault("aliases", {})
-        if alias in aliases:
-            self.update_status(f"Alias '{alias}' already exists.")
-            return
-        aliases[alias] = doc_id
-        config.save_config(self.svc_config)
-        self.update_status(f"Added '{alias}'")
-
     def cmd_remove(self, args):
         if not args:
             self.update_status("Usage: /remove <alias>")
@@ -499,6 +662,10 @@ class MyDocBotApp(App):
             self.update_status("Usage: /rename <old> <new>")
             return
         old, new = args[0], args[1]
+        valid, msg = validation.validate_alias(new)
+        if not valid:
+            self.update_status(f"Invalid alias: {msg}")
+            return
         aliases = self.svc_config.get("aliases", {})
         if old not in aliases:
             self.update_status(f"Alias '{old}' not found.")
@@ -513,17 +680,6 @@ class MyDocBotApp(App):
             self.current_alias = new
         config.save_config(self.svc_config)
         self.update_status(f"Renamed '{old}' -> '{new}'")
-
-    def cmd_current(self):
-        preview = self.query_one("#preview-pane")
-        preview.clear()
-        preview.write(
-            f"[b]Active Document[/b]\n\n"
-            f"Alias:    {self.current_alias}\n"
-            f"Title:    {self.current_title or '(unknown)'}\n"
-            f"Doc ID:   {self.current_doc_id}"
-        )
-        preview.scroll_home(animate=False)
 
     def cmd_edit(self):
         editor_parts = resolve_editor()
@@ -568,28 +724,6 @@ class MyDocBotApp(App):
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
 
-    def cmd_search(self, args):
-        if not args:
-            self.update_status("Usage: /search <keyword>")
-            return
-        keyword = ' '.join(args)
-        results = parser.search_cache(self.notes_cache, self.current_doc_id, keyword)
-        if not results:
-            self.update_status(f"No notes matching '{keyword}'")
-            return
-        lines = [f"[b]Search: {keyword}[/]   {len(results)} notes\n"]
-        for n in results:
-            preview_text = n["text"].replace('\n', ' ')[:100]
-            highlighted = re.sub(
-                f'({re.escape(keyword)})', r'[bold #f9e2af]\1[/]',
-                preview_text, flags=re.IGNORECASE
-            )
-            lines.append(f"[#a6e3a1]{n['ts']}[/] {highlighted}")
-        preview = self.query_one("#preview-pane")
-        preview.clear()
-        preview.write("\n".join(lines))
-        preview.scroll_home(animate=False)
-
     def switch_to_any_doc(self):
         aliases = self.svc_config.get("aliases", {})
         if not aliases:
@@ -606,67 +740,7 @@ class MyDocBotApp(App):
         self.current_doc_id = doc_id
         self.current_title = title or doc_id[:20] + "..."
         self.refresh_ui()
-        self.update_status(f"Switched to '{alias}'")
-
-    def cmd_refresh(self):
-        try:
-            title = google_docs.fetch_doc_title(self._service, self.current_doc_id)
-            if title:
-                self.current_title = title
-
-            recent = google_docs.parse_entries(
-                self._service.documents().get(
-                    documentId=self.current_doc_id
-                ).execute(),
-                count=self._history_size
-            )
-
-            existing = {(n["ts"], n["doc_id"]) for n in self.notes_cache}
-            new_count = 0
-            for ts, body in reversed(recent):
-                if (ts, self.current_doc_id) not in existing:
-                    self._add_to_cache(ts, body, self.current_doc_id)
-                    new_count += 1
-
-            self.refresh_ui()
-            self.update_status(f"Loaded {new_count} new note(s)" if new_count else "No new notes")
-        except Exception as e:
-            self.show_error(f"Refresh failed: {e}")
-
-    def cmd_more(self):
-        try:
-            doc_notes_count = sum(1 for n in self.notes_cache if n["doc_id"] == self.current_doc_id)
-            fetch_count = min(doc_notes_count + self._history_size, self.MAX_CACHE)
-
-            if fetch_count <= doc_notes_count:
-                self.update_status("All notes loaded (cache full or end of document)")
-                return
-
-            recent = google_docs.parse_entries(
-                self._service.documents().get(
-                    documentId=self.current_doc_id
-                ).execute(),
-                count=fetch_count
-            )
-
-            existing = {(n["ts"], n["doc_id"]) for n in self.notes_cache}
-            new_entries = [(ts, body) for ts, body in recent
-                           if (ts, self.current_doc_id) not in existing]
-
-            if not new_entries:
-                self.update_status("No more notes to load")
-                return
-
-            for ts, body in new_entries:
-                self.notes_cache.append({"ts": ts, "text": body, "doc_id": self.current_doc_id})
-
-            if len(self.notes_cache) > self.MAX_CACHE:
-                self.notes_cache[:] = self.notes_cache[:self.MAX_CACHE]
-
-            self.refresh_ui()
-            self.update_status(f"Loaded {len(new_entries)} more note(s)")
-        except Exception as e:
-            self.show_error(f"Load more failed: {e}")
+        self.update_status(f"Switched to '{md_escape(alias)}'")
 
     def cmd_export(self, args):
         filepath = None
@@ -747,9 +821,9 @@ class MyDocBotApp(App):
         if not doc_entries:
             self.update_status(f"No notes with #{tag}")
             return
-        lines = [f"[#f9e2af]#{tag}[/]   {len(doc_entries)} notes\n"]
+        lines = [f"[#f9e2af]#{md_escape(tag)}[/]   {len(doc_entries)} notes\n"]
         for e in doc_entries:
-            lines.append(f"[#a6e3a1]{e['ts']}[/] {e['preview']}")
+            lines.append(f"[#a6e3a1]{md_escape(e['ts'])}[/] {md_escape(e['preview'])}")
         preview = self.query_one("#preview-pane")
         preview.clear()
         preview.write("\n".join(lines))
@@ -787,12 +861,12 @@ class MyDocBotApp(App):
             preview.write(
                 "[b]Config Settings[/b]\n\n"
                 f"  history_size   {history_size}\n"
-                "  [dim](notes loaded on startup / /switch; range 1–500)[/dim]\n\n"
+                f"  [dim](notes loaded on startup / /switch; range "
+                f"{validation.MIN_HISTORY_SIZE}-{validation.MAX_HISTORY_SIZE})[/dim]\n\n"
                 "  [dim]Use /config set history_size <n> to change.[/dim]"
             )
-        preview.scroll_home(animate=False)
-        return
-        if args[0] == 'set' and len(args) >= 3:
+            preview.scroll_home(animate=False)
+        elif args[0] == 'set' and len(args) >= 3:
             key, value = args[1], args[2]
             if key == 'history_size':
                 valid, msg = validation.validate_history_size(value)
@@ -808,7 +882,10 @@ class MyDocBotApp(App):
             else:
                 self.update_status(f"Unknown key '{key}'. Available: history_size")
         else:
-            self.update_status("Usage: /config show | /config set history_size <1-500>")
+            self.update_status(
+                f"Usage: /config show | /config set history_size "
+                f"<{validation.MIN_HISTORY_SIZE}-{validation.MAX_HISTORY_SIZE}>"
+            )
 
     def cmd_help(self):
         preview = self.query_one("#preview-pane")
@@ -838,10 +915,7 @@ class MyDocBotApp(App):
         preview.scroll_home(animate=False)
 
 
-class ReadOnlyApp(App):
-    CSS = CSS
-    ENABLE_COMMAND_PALETTE = False
-
+class ReadOnlyApp(BaseNotesApp):
     BINDINGS = [
         Binding("ctrl+n", "focus_notes", "Notes"),
         Binding("ctrl+p", "focus_preview", "Preview"),
@@ -850,170 +924,54 @@ class ReadOnlyApp(App):
         Binding("ctrl+s", "run_command", "Run"),
     ]
 
-    MAX_CACHE = 500
+    HEADER_TITLE = "MyDocBot — Read-Only"
+    EMPTY_NOTES_MSG = "No notes yet."
+    LIST_HEADER = "Read-Only Documents"
+    NO_DOCS_MSG = "No read-only docs configured. Use CLI --add or create read_config.json."
+    NO_DOCS_LIST_MSG = "No read-only docs configured."
+    ADD_SUCCESS_SUFFIX = " to read-only config"
 
     def __init__(self, start_alias=None):
-        super().__init__()
         self.start_alias = start_alias
-        self.svc_config = config.load_read_config()
-        self._service = google_docs.get_service()
-        self._history_size = config.get_history_size(self.svc_config)
-        self.current_alias = None
-        self.current_doc_id = None
-        self.current_title = None
-        self.notes_cache = []
-        self.all_tags = {}
-        self._last_selected_index = 0
-        self._note_to_display = {}
+        super().__init__()
 
-    def _add_to_cache(self, ts, text, doc_id):
-        self.notes_cache.insert(0, {"ts": ts, "text": text, "doc_id": doc_id})
-        if len(self.notes_cache) > self.MAX_CACHE:
-            self.notes_cache[:] = self.notes_cache[:self.MAX_CACHE]
+    def _load_config(self):
+        return config.load_read_config()
 
-    def _format_date_header(self, date_str):
-        today = datetime.now().strftime("%m/%d/%y")
-        if date_str == today:
-            return "Today"
-        yesterday = (datetime.now() - timedelta(days=1)).strftime("%m/%d/%y")
-        if date_str == yesterday:
-            return "Yesterday"
-        month, day, year = date_str.split("/")
-        return f"{month}/{day}/{year}"
+    def _save_config(self, cfg):
+        config.save_read_config(cfg)
 
-    def _readable_date_header(self, date_str):
+    def _resolve_alias(self, cfg, alias):
+        return config.resolve_read_alias(cfg, alias)
+
+    def _fetch_recent(self, doc_id, count):
+        return google_docs.parse_entries_readable(
+            self._service.documents().get(documentId=doc_id).execute(),
+            count=count
+        )
+
+    def _date_key(self, ts):
+        # Read timestamps look like "[DD/MM/YYYY] [H.M]|...". Rebuild the
+        # "MM/DD/YY" key expected by `_format_date_header` so Today/Yesterday
+        # detection actually lines up with `datetime.now().strftime("%m/%d/%y")`.
+        date_str = ts.split("]")[0][1:]
         day, month, year = date_str.split("/")
-        entry_date = f"{int(year) % 100:02d}/{int(month):02d}/{int(day):02d}"
-        return self._format_date_header(entry_date)
+        return f"{int(month):02d}/{int(day):02d}/{int(year) % 100:02d}"
+
+    def _resolve_initial_alias(self, aliases):
+        if self.start_alias and self.start_alias in aliases:
+            return self.start_alias
+        return super()._resolve_initial_alias(aliases)
 
     def compose(self) -> ComposeResult:
         yield Static("Connecting...", id="header-bar")
         with Horizontal(id="main-area"):
             yield ListView(id="notes-list")
-            yield PreviewPane(id="preview-pane", max_lines=None, highlight=False, wrap=True)
+            yield PreviewPane(id="preview-pane", max_lines=None, highlight=False, wrap=True, markup=True)
         with Horizontal(id="input-area"):
             yield TextArea(id="cmd-bar", text="", placeholder="Type /command... (Ctrl+S to run)")
             yield Button("Run", id="submit-btn", variant="primary")
         yield Static("Initializing...", id="status-bar")
-
-    def on_mount(self):
-        preview = self.query_one("#preview-pane")
-        preview.write("Select a note to preview")
-        self.init_app()
-
-    def init_app(self):
-        try:
-            aliases = self.svc_config.get("aliases", {})
-            if not aliases:
-                self.show_error("No read-only docs configured. Use CLI --add or create read_config.json.")
-                return
-
-            if self.start_alias and self.start_alias in aliases:
-                self.current_alias = self.start_alias
-            else:
-                default = self.svc_config.get("default", "")
-                self.current_alias = default if default in aliases else next(iter(aliases))
-
-            self.current_doc_id = aliases[self.current_alias]
-            self.current_title = google_docs.fetch_doc_title(self._service, self.current_doc_id)
-            if not self.current_title:
-                self.current_title = self.current_doc_id[:20] + "..."
-
-            recent = google_docs.parse_entries_readable(
-                self._service.documents().get(
-                    documentId=self.current_doc_id
-                ).execute(),
-                count=self._history_size
-            )
-            for ts, body in reversed(recent):
-                self._add_to_cache(ts, body, self.current_doc_id)
-
-            self.all_tags = parser.load_tags_index()
-        except Exception as e:
-            self.show_error(f"Startup error: {e}")
-            if not self.current_alias:
-                self.current_alias = "?"
-            if not self.current_doc_id:
-                self.current_doc_id = "?"
-            self.current_title = "(error)"
-
-        self.refresh_ui()
-
-    def refresh_ui(self):
-        header = self.query_one("#header-bar")
-        doc_display = f"[bold]{self.current_alias}[/] [italic]{self.current_title}[/]"
-        status = "● Connected"
-        header.update(f"[b]MyDocBot — Read-Only[/b]     {doc_display}     {status}")
-
-        notes_list = self.query_one("#notes-list")
-        notes_list.clear()
-        doc_notes = [n for n in self.notes_cache if n["doc_id"] == self.current_doc_id]
-
-        if not doc_notes:
-            notes_list.append(
-                ListItem(Label("[#585b70]No notes yet.[/]"))
-            )
-            self.update_status("Ready")
-            return
-
-        current_date = None
-        self._note_to_display = {}
-        note_idx = 0
-        display_idx = 0
-
-        for n in doc_notes:
-            date_part = n["ts"].split("]")[0][1:]
-            if date_part != current_date:
-                current_date = date_part
-                notes_list.append(DateSeparator(self._readable_date_header(date_part)))
-                display_idx += 1
-            item = NoteItem(n["ts"], n["text"], n["doc_id"])
-            notes_list.append(item)
-            self._note_to_display[note_idx] = display_idx
-            note_idx += 1
-            display_idx += 1
-
-        target_note = min(self._last_selected_index, note_idx - 1)
-        display_target = self._note_to_display.get(target_note, 0)
-        notes_list.index = display_target
-        self.show_note_preview(display_target)
-
-        self.update_status("Ready")
-
-    def on_list_view_selected(self, event):
-        notes_list = self.query_one("#notes-list")
-        if notes_list.index is not None:
-            children = list(notes_list.children)
-            idx = notes_list.index
-            if idx < len(children) and getattr(children[idx], '_is_separator', False):
-                return
-            note_idx = sum(1 for i in range(idx) if not getattr(children[i], '_is_separator', False))
-            self._last_selected_index = note_idx
-            self.show_note_preview(idx)
-
-    def show_note_preview(self, display_index):
-        notes_list = self.query_one("#notes-list")
-        children = list(notes_list.children)
-        if not children or display_index >= len(children):
-            return
-        item = children[display_index]
-        while getattr(item, '_is_separator', False):
-            display_index += 1
-            if display_index >= len(children):
-                return
-            item = children[display_index]
-        ts = item.note_ts
-        text = item.note_text
-        preview = self.query_one("#preview-pane")
-        highlighted = re.sub(
-            r'(#\w+)',
-            r'[bold #f9e2af]\1[/]',
-            text
-        )
-        preview.clear()
-        preview.write(f"[#a6e3a1]{ts}[/]\n\n{highlighted}")
-        preview.refresh()
-        preview.scroll_home(animate=False)
 
     def action_run_command(self):
         self.run_command()
@@ -1029,23 +987,9 @@ class ReadOnlyApp(App):
         else:
             self.update_status("Read-only mode. Type /command or /help.")
 
-    def update_status(self, msg):
-        status_bar = self.query_one("#status-bar")
-        status_bar.update(msg)
-
-    def show_error(self, msg):
-        status_bar = self.query_one("#status-bar")
-        status_bar.update(f"[#f38ba8]{msg}[/]")
-
     def on_button_pressed(self, event):
         if event.button.id == "submit-btn":
             self.run_command()
-
-    def action_focus_notes(self):
-        self.query_one("#notes-list").focus()
-
-    def action_focus_preview(self):
-        self.query_one("#preview-pane").focus()
 
     def action_focus_cmd(self):
         self.query_one("#cmd-bar").focus()
@@ -1074,156 +1018,6 @@ class ReadOnlyApp(App):
         else:
             self.update_status(f"Unknown: {command}. Type /help")
 
-    def cmd_switch(self, args):
-        if not args:
-            self.update_status("Usage: /switch <alias>")
-            return
-        alias = args[0]
-        doc_id = config.resolve_read_alias(self.svc_config, alias)
-        if not doc_id:
-            self.update_status(f"Unknown alias '{alias}'")
-            return
-        title = google_docs.fetch_doc_title(self._service, doc_id)
-        self.current_alias = alias
-        self.current_doc_id = doc_id
-        self.current_title = title or doc_id[:20] + "..."
-        self.notes_cache = [n for n in self.notes_cache if n["doc_id"] != doc_id]
-        recent = google_docs.parse_entries_readable(
-            self._service.documents().get(documentId=doc_id).execute(),
-            count=self._history_size
-        )
-        for ts, body in reversed(recent):
-            self._add_to_cache(ts, body, doc_id)
-        self._last_selected_index = 0
-        self.refresh_ui()
-        self.update_status(f"Switched to '{alias}' ({title or doc_id})")
-
-    def cmd_list(self):
-        aliases = self.svc_config.get("aliases", {})
-        if not aliases:
-            self.update_status("No read-only docs configured.")
-            return
-        lines = []
-        for alias, doc_id in aliases.items():
-            marker = " ← active" if alias == self.current_alias else ""
-            title = google_docs.fetch_doc_title(self._service, doc_id)
-            display = f'"{title}"' if title else doc_id
-            lines.append(f"  {alias:<12} {display}{marker}")
-        preview = self.query_one("#preview-pane")
-        preview.clear()
-        preview.write("[b]Read-Only Documents[/b]\n\n" + "\n".join(lines))
-        preview.scroll_home(animate=False)
-
-    def cmd_add(self, args):
-        if not args or len(args) < 2:
-            self.update_status("Usage: /add <alias> <doc_id>")
-            return
-        alias, doc_id = args[0], args[1]
-        valid, msg = validation.validate_doc_id(doc_id)
-        if not valid:
-            self.update_status(f"Invalid doc_id: {msg}")
-            return
-        aliases = self.svc_config.setdefault("aliases", {})
-        if alias in aliases:
-            self.update_status(f"Alias '{alias}' already exists.")
-            return
-        aliases[alias] = doc_id
-        config.save_read_config(self.svc_config)
-        self.update_status(f"Added '{alias}' to read-only config")
-
-    def cmd_current(self):
-        preview = self.query_one("#preview-pane")
-        preview.clear()
-        preview.write(
-            f"[b]Active Document[/b]\n\n"
-            f"Alias:    {self.current_alias}\n"
-            f"Title:    {self.current_title or '(unknown)'}\n"
-            f"Doc ID:   {self.current_doc_id}"
-        )
-        preview.scroll_home(animate=False)
-
-    def cmd_search(self, args):
-        if not args:
-            self.update_status("Usage: /search <keyword>")
-            return
-        keyword = ' '.join(args)
-        results = parser.search_cache(self.notes_cache, self.current_doc_id, keyword)
-        if not results:
-            self.update_status(f"No notes matching '{keyword}'")
-            return
-        lines = [f"[b]Search: {keyword}[/]   {len(results)} notes\n"]
-        for n in results:
-            preview_text = n["text"].replace('\n', ' ')[:100]
-            highlighted = re.sub(
-                f'({re.escape(keyword)})', r'[bold #f9e2af]\1[/]',
-                preview_text, flags=re.IGNORECASE
-            )
-            lines.append(f"[#a6e3a1]{n['ts']}[/] {highlighted}")
-        preview = self.query_one("#preview-pane")
-        preview.clear()
-        preview.write("\n".join(lines))
-        preview.scroll_home(animate=False)
-
-    def cmd_refresh(self):
-        try:
-            title = google_docs.fetch_doc_title(self._service, self.current_doc_id)
-            if title:
-                self.current_title = title
-
-            recent = google_docs.parse_entries_readable(
-                self._service.documents().get(
-                    documentId=self.current_doc_id
-                ).execute(),
-                count=self._history_size
-            )
-
-            existing = {(n["ts"], n["doc_id"]) for n in self.notes_cache}
-            new_count = 0
-            for ts, body in reversed(recent):
-                if (ts, self.current_doc_id) not in existing:
-                    self._add_to_cache(ts, body, self.current_doc_id)
-                    new_count += 1
-
-            self.refresh_ui()
-            self.update_status(f"Loaded {new_count} new note(s)" if new_count else "No new notes")
-        except Exception as e:
-            self.show_error(f"Refresh failed: {e}")
-
-    def cmd_more(self):
-        try:
-            doc_notes_count = sum(1 for n in self.notes_cache if n["doc_id"] == self.current_doc_id)
-            fetch_count = min(doc_notes_count + self._history_size, self.MAX_CACHE)
-
-            if fetch_count <= doc_notes_count:
-                self.update_status("All notes loaded (cache full or end of document)")
-                return
-
-            recent = google_docs.parse_entries_readable(
-                self._service.documents().get(
-                    documentId=self.current_doc_id
-                ).execute(),
-                count=fetch_count
-            )
-
-            existing = {(n["ts"], n["doc_id"]) for n in self.notes_cache}
-            new_entries = [(ts, body) for ts, body in recent
-                           if (ts, self.current_doc_id) not in existing]
-
-            if not new_entries:
-                self.update_status("No more notes to load")
-                return
-
-            for ts, body in new_entries:
-                self.notes_cache.append({"ts": ts, "text": body, "doc_id": self.current_doc_id})
-
-            if len(self.notes_cache) > self.MAX_CACHE:
-                self.notes_cache[:] = self.notes_cache[:self.MAX_CACHE]
-
-            self.refresh_ui()
-            self.update_status(f"Loaded {len(new_entries)} more note(s)")
-        except Exception as e:
-            self.show_error(f"Load more failed: {e}")
-
     def cmd_help(self):
         preview = self.query_one("#preview-pane")
         preview.clear()
@@ -1240,4 +1034,3 @@ class ReadOnlyApp(App):
             "[dim]Ctrl+S run | Ctrl+N notes | Ctrl+P preview | Ctrl+E command | Tab cycle[/]"
         )
         preview.scroll_home(animate=False)
-
