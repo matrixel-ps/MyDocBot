@@ -28,6 +28,17 @@ def tmp_config_path(monkeypatch):
 
 
 @pytest.fixture
+def tmp_read_config_path(monkeypatch):
+    tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
+    tmp_path = tmp.name
+    tmp.close()
+    monkeypatch.setattr('core.config.READ_CONFIG_PATH', tmp_path)
+    yield tmp_path
+    if os.path.exists(tmp_path):
+        os.unlink(tmp_path)
+
+
+@pytest.fixture
 def tmp_tags_index_path(monkeypatch):
     tmp = tempfile.NamedTemporaryFile(mode='w', suffix='.json', delete=False)
     tmp_path = tmp.name
