@@ -6,7 +6,7 @@ python -m ruff check .
 
 echo ""
 echo "=== mypy ==="
-python -m mypy main.py core/ tests/ || true
+python -m mypy main.py mydocbot_app.py core/ tests/
 
 echo ""
 echo "=== tests ==="
