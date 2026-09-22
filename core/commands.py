@@ -161,6 +161,10 @@ def cmd_add(svc_config, args):
         print("Usage: /add <alias> <doc_id>")
         return
     alias, doc_id = args[0], args[1]
+    valid, msg = validation.validate_alias(alias)
+    if not valid:
+        print(f"Invalid alias: {msg}")
+        return
     valid, msg = validation.validate_doc_id(doc_id)
     if not valid:
         print(f"Invalid doc_id: {msg}")
@@ -201,6 +205,10 @@ def cmd_rename(svc_config, args):
         print("Usage: /rename <old_alias> <new_alias>")
         return
     old, new = args[0], args[1]
+    valid, msg = validation.validate_alias(new)
+    if not valid:
+        print(f"Invalid alias: {msg}")
+        return
     aliases = svc_config.get("aliases", {})
     if old not in aliases:
         print(f"Alias '{old}' not found.")
@@ -323,7 +331,8 @@ def cmd_config(svc_config, args):
         history_size = config.get_history_size(svc_config)
         print("Config settings:")
         print(f"  history_size   {history_size}   "
-              "(notes loaded on startup / /switch; range 1–500)")
+              f"(notes loaded on startup / /switch; range "
+              f"{validation.MIN_HISTORY_SIZE}-{validation.MAX_HISTORY_SIZE})")
         return
     if args[0] == 'set' and len(args) >= 3:
         key, value = args[1], args[2]
@@ -340,7 +349,8 @@ def cmd_config(svc_config, args):
             print(f"Unknown config key '{key}'. Available keys: history_size")
     else:
         print("Usage: /config show | /config set <key> <value>")
-        print("       /config set history_size <1-500>")
+        print(f"       /config set history_size "
+              f"<{validation.MIN_HISTORY_SIZE}-{validation.MAX_HISTORY_SIZE}>")
 
 
 def cmd_help():
@@ -359,7 +369,8 @@ def cmd_help():
     print("  /tag search <t> [--since/--until]  Find notes by tag")
     print("  /tag stats                     Tag frequency chart")
     print("  /config show                   Show config settings")
-    print("  /config set history_size <n>   Set notes loaded on startup (1-500)")
+    print(f"  /config set history_size <n>   Set notes loaded on startup "
+          f"({validation.MIN_HISTORY_SIZE}-{validation.MAX_HISTORY_SIZE})")
     print("  /help                          Show this message")
     print("  exit                           Quit the application")
 

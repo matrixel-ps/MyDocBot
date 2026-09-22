@@ -42,6 +42,10 @@ def main():
 
     if args.add:
         alias, doc_id = args.add
+        valid, vmsg = validation.validate_alias(alias)
+        if not valid:
+            print(f"Invalid alias: {vmsg}")
+            return
         valid, vmsg = validation.validate_doc_id(doc_id)
         if not valid:
             print(f"Invalid doc_id: {vmsg}")

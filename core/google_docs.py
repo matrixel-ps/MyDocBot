@@ -15,6 +15,19 @@ BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CREDENTIALS_PATH = os.path.join(BASE_DIR, 'credentials.json')
 TOKEN_PATH = os.path.join(BASE_DIR, 'token.json')
 
+# In-process cache of doc_id -> title, to avoid re-fetching the same doc's
+# title on every /list, /switch, or startup call within a single session.
+# Only successful lookups are cached; failures (None) are always retried.
+_TITLE_CACHE: dict[str, str] = {}
+
+
+def invalidate_title_cache(doc_id=None):
+    """Drop a single cached title (or all of them if doc_id is None)."""
+    if doc_id is None:
+        _TITLE_CACHE.clear()
+    else:
+        _TITLE_CACHE.pop(doc_id, None)
+
 
 def get_service():
     creds = None
@@ -25,12 +38,23 @@ def get_service():
         if creds and creds.expired and creds.refresh_token:
             creds.refresh(Request())
         else:
+            if not os.path.exists(CREDENTIALS_PATH):
+                raise SystemExit(
+                    f"Error: '{CREDENTIALS_PATH}' not found.\n"
+                    "Download OAuth 2.0 credentials (Desktop app) from the Google Cloud "
+                    "Console and save them as 'credentials.json' in the project root. "
+                    "See README.md 'Setup' section for details."
+                )
             flow = InstalledAppFlow.from_client_secrets_file(
                 CREDENTIALS_PATH, SCOPES)
             creds = flow.run_local_server(port=0)
 
         with open(TOKEN_PATH, 'w') as token:
             token.write(creds.to_json())
+        try:
+            os.chmod(TOKEN_PATH, 0o600)
+        except OSError:
+            pass  # best-effort on platforms without POSIX permission support
 
     return build('docs', 'v1', credentials=creds)
 
@@ -51,12 +75,16 @@ def _api_call_with_retry(fn, max_retries=3):
             raise
 
 
-def fetch_doc_title(service, doc_id):
+def fetch_doc_title(service, doc_id, use_cache=True):
+    if use_cache and doc_id in _TITLE_CACHE:
+        return _TITLE_CACHE[doc_id]
     try:
         doc = _api_call_with_retry(
             lambda: service.documents().get(documentId=doc_id).execute()
         )
-        return doc.get('title', '(untitled)')
+        title = doc.get('title', '(untitled)')
+        _TITLE_CACHE[doc_id] = title
+        return title
     except Exception:
         return None
 

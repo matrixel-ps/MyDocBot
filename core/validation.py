@@ -3,6 +3,7 @@ import re
 MAX_NOTE_LENGTH = 50 * 1024
 MIN_HISTORY_SIZE = 1
 MAX_HISTORY_SIZE = 500
+DEFAULT_HISTORY_SIZE = 20
 
 
 def validate_doc_id(doc_id):
@@ -12,6 +13,21 @@ def validate_doc_id(doc_id):
         return False, "Doc ID must contain only letters, numbers, underscores, and hyphens"
     if len(doc_id) < 10:
         return False, "Doc ID seems too short (must be at least 10 characters)"
+    return True, None
+
+
+def validate_alias(alias):
+    """Validate a document alias name (used by /add and /rename).
+
+    Aliases are matched via whitespace-split command parsing, so they must not
+    contain whitespace, and must not collide with the '/' command prefix.
+    """
+    if not alias or not alias.strip():
+        return False, "Alias cannot be empty"
+    if re.search(r'\s', alias):
+        return False, "Alias cannot contain whitespace"
+    if alias.startswith('/'):
+        return False, "Alias cannot start with '/' (reserved for commands)"
     return True, None
 
 

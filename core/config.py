@@ -2,7 +2,7 @@ import json
 import os
 import sys
 
-from core.validation import validate_config
+from core.validation import DEFAULT_HISTORY_SIZE, validate_config
 
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 CONFIG_PATH = os.path.join(BASE_DIR, 'docs_config.json')
@@ -30,10 +30,19 @@ def load_config():
         return config
 
 
+def _chmod_owner_only(path):
+    """Best-effort restrict a config file to owner read/write (0600)."""
+    try:
+        os.chmod(path, 0o600)
+    except OSError:
+        pass  # platforms without POSIX permission support (e.g. some Windows setups)
+
+
 def save_config(config):
     with open(CONFIG_PATH, 'w') as f:
         json.dump(config, f, indent=2)
         f.write('\n')
+    _chmod_owner_only(CONFIG_PATH)
 
 
 def resolve_alias(config, alias):
@@ -44,11 +53,11 @@ def resolve_alias(config, alias):
 
 
 def get_history_size(config):
-    """Return the configured history_size, defaulting to 20."""
+    """Return the configured history_size, defaulting to DEFAULT_HISTORY_SIZE."""
     try:
-        return int(config.get("history_size", 20))
+        return int(config.get("history_size", DEFAULT_HISTORY_SIZE))
     except (ValueError, TypeError):
-        return 20
+        return DEFAULT_HISTORY_SIZE
 
 
 def load_read_config():
@@ -76,6 +85,7 @@ def save_read_config(config):
     with open(READ_CONFIG_PATH, 'w') as f:
         json.dump(config, f, indent=2)
         f.write('\n')
+    _chmod_owner_only(READ_CONFIG_PATH)
 
 
 def resolve_read_alias(config, alias):
