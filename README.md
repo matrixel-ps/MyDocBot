@@ -482,6 +482,11 @@ A full codebase audit (bugs, dead code, duplication, tooling gaps) was performed
    `/flush` without ever telling you why it can't succeed.
 5. Consider the two items already in the Feature Backlog above (tag autocomplete,
    multi-doc tag aggregation).
+6. A project review on 2026-10-23 found more bugs and improvement ideas — notably
+   offline-queued notes landing above newer notes and never being tag-indexed, an
+   unhandled expired-token crash, and personal data files being tracked in git. The full
+   prioritized list lives in `docs/agent-notes/improvement-plan.md` under "Backlog
+   additions from project review (2026-10-23)".
 
 ---
 
