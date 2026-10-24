@@ -427,66 +427,11 @@ All tests use monkeypatched Google API and temp files — no network, no OAuth. 
 
 ---
 
-## Feature Backlog (Not Yet Implemented)
+## Open Work
 
-- **Tag autocomplete in TUI:** Suggest known tags from `tags_index.json` when the user types `#` in the read/write TUI's input area.
-- **Multi-doc tag aggregation:** A `--all` flag for `/tag` commands to aggregate tags across all configured documents, rather than only the currently active one.
-
----
-
-## Recommended Next Steps
-
-A full codebase audit (bugs, dead code, duplication, tooling gaps) was performed; see
-`CHANGELOG.md` for what was already fixed. What's fixed vs. still open:
-
-### Done
-- Fixed a critical dead-code bug where `/config set history_size <n>` was unreachable in
-  the read/write TUI.
-- Fixed literal Rich markup codes (`[#a6e3a1]...[/]`) cluttering timestamps/note text in
-  both TUIs, and escaped all dynamic content to prevent real bracketed note content from
-  being misinterpreted as markup.
-- Added `validate_alias()`, applied to all `/add`/`/rename` call sites (CLI + both TUIs).
-- Added an in-process `doc_id → title` cache to cut redundant Google API calls.
-- Hardened `get_service()` against a missing `credentials.json`; tightened file
-  permissions (`0600`) on `token.json` and the JSON config files.
-- Made `lint.sh` a real CI gate (mypy now covers `mydocbot_app.py` and can no longer fail
-  silently); added a GitHub Actions workflow to run it automatically.
-- Added a headless Textual `run_test()` test suite (`tests/test_tui.py`) — the first tests
-  ever written against `mydocbot_app.py` (previously ~45% of the codebase, 0% covered).
-- Consolidated duplicated magic numbers (`MAX_CACHE`, default `history_size`, the
-  `"1-500"` range string) into single named constants.
-- **Extracted a shared `BaseNotesApp`** from `MyDocBotApp`/`ReadOnlyApp` — the two classes
-  in `mydocbot_app.py` previously duplicated ~230 lines of near-identical logic (cache
-  management, date grouping, note preview, `/switch`/`/list`/`/current`/`/search`
-  /`/refresh`/`/more`). `BaseNotesApp` now owns that shared state/behavior via 6 hook
-  methods (`_load_config`, `_save_config`, `_resolve_alias`, `_fetch_recent`, `_date_key`,
-  `_resolve_initial_alias`) plus 6 text/label class attributes; `BINDINGS`, `compose()`,
-  the `handle_command()` dispatch tables, `/help` text, and write-only commands stay
-  per-subclass since they genuinely differ. File size: 1265 → 1036 lines. Also fixed a
-  latent bug found during the extraction: the read-only TUI's "Today"/"Yesterday" date
-  separators never matched (comparison key was built in the wrong field order), so
-  today's notes always showed a literal date instead of "Today".
-
-### Still Recommended (not yet done — good candidates for a follow-up session)
-1. **Unify `/search` semantics:** the CLI always fetches fresh results from the API; both
-   TUIs only search the in-memory session cache. This is a real, undocumented behavioral
-   difference — either unify it or call it out explicitly in `/help`.
-2. **True pagination for `/more`:** it currently re-downloads and re-parses the *entire*
-   document just to surface a few older notes — fine for small personal docs, but
-   `O(doc size)` per click as a doc grows.
-3. **File locking** around `docs_config.json`/`read_config.json`/`tags_index.json`
-   /`pending_queue.json` if you routinely run the CLI and a TUI against the same project
-   directory at the same time (currently a documented but unguarded use case).
-4. **Distinguish permanent vs. transient failures in `prepend_text()`** — a permanently
-   invalid `doc_id` or revoked permission currently queues forever and retries on every
-   `/flush` without ever telling you why it can't succeed.
-5. Consider the two items already in the Feature Backlog above (tag autocomplete,
-   multi-doc tag aggregation).
-6. A project review on 2026-10-23 found more bugs and improvement ideas — notably
-   offline-queued notes landing above newer notes and never being tag-indexed, an
-   unhandled expired-token crash, and personal data files being tracked in git. The full
-   prioritized list lives in `docs/agent-notes/improvement-plan.md` under "Backlog
-   additions from project review (2026-10-23)".
+Known bugs, planned features, and improvement ideas are tracked in one place:
+[`docs/backlog.md`](docs/backlog.md). Notable fixes and changes already made are in
+[`CHANGELOG.md`](CHANGELOG.md).
 
 ---
 

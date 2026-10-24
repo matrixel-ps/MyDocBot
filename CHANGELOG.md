@@ -2,6 +2,7 @@
 
 All notable changes to MyDocBot are documented in this file.
 Format loosely follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
+Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlog.md).
 
 ## [Unreleased]
 
@@ -95,12 +96,3 @@ including: single-threaded TUI (network calls block the UI), local-only tag
 index (no historical backfill), `#tag` regex limited to word characters,
 and independent read/write alias configs.
 
-### Not Yet Done (see "Recommended Next Steps" in README.md)
-- `/search` behaves differently between CLI (always fetches fresh from the
-  API) and TUI (searches the in-memory session cache only) — not yet
-  unified or clearly documented in `/help`.
-- No file locking around the JSON config/index files if CLI and TUI are run
-  concurrently against the same project directory.
-- Tag/keyword command arguments typed by the user are not escaped before
-  being shown in TUI status messages (low risk for a single-user personal
-  tool, but noted for completeness).
