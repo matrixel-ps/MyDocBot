@@ -25,9 +25,10 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 ## Suggested order
 
-1. **P1:** stop tracking personal data files.
-2. **A2 + B1 + B2 + B3** as one task: a single submit path fixes all three bugs.
-3. **B4:** handle expired or revoked OAuth tokens.
+1. **A2 + B1 + B2 + B3** as one task: a single submit path fixes all three bugs.
+2. **B4:** handle expired or revoked OAuth tokens.
+3. **P1:** stop tracking personal data files (lower urgency since the repo is
+   private; do it before F2, which moves those files anyway).
 4. **F1 + F2:** one-line capture and installing as a command.
 5. **F4:** `/tag reindex`.
 
@@ -48,7 +49,7 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
-| P1 | **Stop tracking personal data files** | open | high | S | .gitignore, README.md, new `docs_config.example.json` | `docs_config.json` and `tags_index.json` are tracked and pushed (the tag index holds real note previews), and README shows the real doc ID 3 times. Untrack them (`git rm --cached`), add an example config, and use a placeholder ID in README. If the repo is public, scrubbing history is a separate decision for the user. |
+| P1 | **Stop tracking personal data files** | open | med | S | .gitignore, README.md, new `docs_config.example.json` | `docs_config.json` and `tags_index.json` are tracked and pushed (the tag index holds real note previews), and README shows the real doc ID 3 times. Untrack them (`git rm --cached`), add an example config, and use a placeholder ID in README. The repo is private (confirmed 2026-10-23), so this is hygiene, not a leak, and scrubbing history is likely unnecessary unless the repo is ever made public. |
 | P2 | **Split runtime vs. dev dependencies, pin lint tools** | open | med | S | requirements.txt, .github/workflows/ci.yml | pytest sits next to runtime packages, and CI installs unpinned ruff/mypy (local pins: `ruff==0.15.18`, `mypy==2.1.0`). Add `requirements-dev.txt` or pyproject optional-deps. |
 | P3 | **CI Python version doesn't match local** | open | low | XS | .github/workflows/ci.yml | CI runs 3.11, local is 3.14, and the stated minimum is 3.10. Use a 3.10 + 3.14 matrix. |
 
