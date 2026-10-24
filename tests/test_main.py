@@ -16,7 +16,7 @@ from unittest.mock import MagicMock, patch
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _run_main_with_inputs(inputs, *, prepend_ok=True, pending=0, flushed=0,
+def _run_main_with_inputs(inputs, *, prepend_ok=True, pending=0, flushed=(),
                           monkeypatch=None):
     """
     Drive main() through one full REPL iteration then quit.
@@ -38,7 +38,7 @@ def _run_main_with_inputs(inputs, *, prepend_ok=True, pending=0, flushed=0,
                     with patch('main.google_docs.prepend_text', return_value=prepend_ok):
                         with patch('main.parser.count_pending', return_value=pending):
                             with patch('main.parser.index_note') as mock_index:
-                                with patch('main.parser.flush_pending_notes', return_value=flushed) as mock_flush:
+                                with patch('main.parser.flush_pending_notes', return_value=list(flushed)) as mock_flush:
                                     with patch('main.parser.queue_note') as mock_queue:
                                         with patch('builtins.input', side_effect=inputs):
                                             main.main()
@@ -59,7 +59,7 @@ class TestMainParserIsNotArgparse:
         inputs = ["my note text", "", "exit"]
         # If the bug were present, this would raise AttributeError inside main().
         # A successful return (no exception) means core.parser was reached.
-        _run_main_with_inputs(inputs, prepend_ok=True, pending=0, flushed=0)
+        _run_main_with_inputs(inputs, prepend_ok=True, pending=0)
 
     def test_index_note_called_on_success(self):
         """parser.index_note() must be called after a successful prepend."""
@@ -100,7 +100,7 @@ class TestMainSubmitOutput:
                         with patch('main.google_docs.prepend_text', return_value=True):
                             with patch('main.parser.count_pending', return_value=0):
                                 with patch('main.parser.index_note'):
-                                    with patch('main.parser.flush_pending_notes', return_value=0):
+                                    with patch('main.parser.flush_pending_notes', return_value=[]):
                                         with patch('main.parser.queue_note'):
                                             with patch('builtins.input', side_effect=inputs):
                                                 import main
@@ -119,7 +119,7 @@ class TestMainSubmitOutput:
                         with patch('main.google_docs.prepend_text', return_value=False):
                             with patch('main.parser.count_pending', return_value=3):
                                 with patch('main.parser.index_note'):
-                                    with patch('main.parser.flush_pending_notes', return_value=0):
+                                    with patch('main.parser.flush_pending_notes', return_value=[]):
                                         with patch('main.parser.queue_note'):
                                             with patch('builtins.input', side_effect=inputs):
                                                 import main
@@ -139,7 +139,7 @@ class TestMainSubmitOutput:
                         with patch('main.google_docs.prepend_text', return_value=True):
                             with patch('main.parser.count_pending', return_value=0):
                                 with patch('main.parser.index_note'):
-                                    with patch('main.parser.flush_pending_notes', return_value=2):
+                                    with patch('main.parser.flush_pending_notes', return_value=[{}, {}]):
                                         with patch('main.parser.queue_note'):
                                             with patch('builtins.input', side_effect=inputs):
                                                 import main

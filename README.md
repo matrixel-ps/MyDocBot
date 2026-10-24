@@ -22,16 +22,19 @@ User Input (CLI / TUI / Read-Only TUI)
        │                          ▶ core/google_docs.py (API + retry, two entry parsers)
        │                          ▶ core/validation.py  (input guards)
        │
-       └──▶ Note Submission
+       └──▶ Note Submission — core/notes.py: submit_note(service, doc_id, text)
                │
-               ├── 1. validate_note(text)           → reject if empty / too long
-               ├── 2. prepend_text(service, id, entry) → bool (retries transient errors)
-               ├── 3. index_note(text, ts, doc_id)  → tags_index.json updated
-               └── 4. flush_pending_notes(service)  → drain offline queue on success
+               ├── 1. validate_note(text)              → reject if empty / too long
+               ├── 2. flush_pending_notes(service)     → write queued notes first, oldest first
+               │                                          (stops per doc at the first failure)
+               ├── 3. still queued for this doc?       → queue this note behind them
+               ├── 4. prepend_text(service, id, entry) → bool (retries transient errors)
+               └── 5. index_note(...) on success, queue_note(...) on failure
 ```
 
 Writes go to Google Docs API. Tags are indexed locally in `tags_index.json`.
-Failed writes are queued in `pending_queue.json` and retried automatically on the next success.
+Failed writes are queued in `pending_queue.json` and retried, oldest first, before the next note is
+written, so the doc keeps the order notes were written in.
 The read-only mode never writes — it fetches and parses entries from a doc using a different
 timestamp format (see `parse_entries_readable()` below).
 
@@ -43,6 +46,7 @@ timestamp format (see `parse_entries_readable()` below).
 | `google_docs.py` | Google Docs API wrappers | `get_service()`, `prepend_text()` → bool, `fetch_doc_title()`, `parse_entries()`, `parse_entries_readable()` |
 | `parser.py` | Tags, search, offline queue, date filters | `extract_tags()`, `index_note()`, `search_cache()`, `queue_note()`, `count_pending()`, `flush_pending_notes()`, `parse_date_flags()`, `filter_tag_entries_by_date()` |
 | `validation.py` | Input guards | `validate_doc_id()`, `validate_alias()`, `validate_config()`, `validate_note()`, `validate_history_size()` |
+| `notes.py` | The single note write path (CLI + TUI) | `submit_note()` → `SubmitResult`, `format_timestamp()` |
 | `commands.py` | CLI command handlers | `dispatch()`, all `cmd_*()` functions, `resolve_editor()`, `open_editor()`, `export_to_markdown()` |
 
 ---
@@ -54,7 +58,7 @@ timestamp format (see `parse_entries_readable()` below).
 - **TUI:** [Textual](https://textual.textualize.io/) 0.41+ — async widget framework (two apps: read/write and read-only)
 - **Storage:** Google Docs API (`google-api-python-client`, `google-auth-oauthlib`, OAuth 2.0)
 - **Config:** Local JSON files — `docs_config.json` (write-mode aliases), `read_config.json` (read-only aliases), and `tags_index.json` (tag index)
-- **Testing:** pytest 7.4+ with monkeypatched Google API — **167 tests, 0 network needed** (includes a headless Textual `run_test()` suite for both TUI apps)
+- **Testing:** pytest 7.4+ with monkeypatched Google API — **189 tests, 0 network needed** (includes a headless Textual `run_test()` suite for both TUI apps)
 - **Lint/Types:** ruff (0 errors) + mypy — both are real CI gates via `lint.sh` (mypy covers `mydocbot_app.py` too, not just `core/`)
 - **CI:** GitHub Actions (`.github/workflows/ci.yml`) runs `lint.sh` on every push/PR to `main`/`dev`
 
@@ -73,7 +77,7 @@ timestamp format (see `parse_entries_readable()` below).
 - **`/export [<tag>] [--file <path>]`:** Exports notes to a local Markdown file — either the notes tagged with `<tag>` (from the local tag index) or the most recent notes fetched from the API if no tag is given.
 - **`/config show` / `/config set history_size <n>`:** View or change how many notes are loaded on startup/switch (range 1–500, default 20).
 - **Tag commands:** `/tag list`, `/tag search <tag>`, `/tag stats` — all operate on local `tags_index.json` only. `/tag search` supports `--since` / `--until` date filters.
-- **Offline queue:** Failed submissions are saved to `pending_queue.json`. The queue is automatically flushed on the next successful write. Use `/flush` to retry manually. Pending count is shown in the prompt.
+- **Offline queue:** Failed submissions are saved to `pending_queue.json`. Before each new note is written, queued notes for all docs are retried, oldest first, so the doc stays in order; if a doc's queued notes still fail, new notes for it are queued behind them. Tags in queued notes are indexed once they're written. Use `/flush` to retry manually. Pending count is shown in the prompt.
 - **Input validation:** Empty notes, oversized notes (>50 KB), and malformed doc IDs are rejected before any API call.
 - **Error resilience:** Network failures are caught — session continues, note is queued. Corrupt `docs_config.json` falls back to a fresh empty config with a stderr warning.
 
@@ -99,7 +103,7 @@ timestamp format (see `parse_entries_readable()` below).
 - **`/more`:** Loads older notes beyond the initial startup batch into the cache/list.
 - **`/export [<tag>] [--file <path>]`:** Same export behavior as the CLI, run from inside the TUI.
 - **`/config show` / `/config set history_size <n>`:** Same config command as the CLI.
-- **Offline queue:** Same queue mechanics as CLI — `/flush` available, pending count shown in status bar.
+- **Offline queue:** Same queue mechanics as CLI — `/flush` available, pending count shown in status bar. Notes written from the queue appear in the notes list right away.
 - **Notes cache:** Newest-first, capped at 500 entries. Loaded from Google Docs on startup and after each doc switch (`history_size` most recent entries, default 20).
 - **Dark theme:** Catppuccin-inspired. Background `#1e1e2e`, accents `#89b4fa` (blue), `#a6e3a1` (green), `#f38ba8` (red warning), `#585b70` (dimmed separators).
 
@@ -330,19 +334,21 @@ Note body here — multiple lines preserved.
 
 ```
 .
-├── main.py                  (153 lines) CLI entry, argparse, REPL loop, --read/--tui dispatch
-├── mydocbot_app.py          (1036 lines) Textual TUIs — BaseNotesApp (shared) + MyDocBotApp
+├── main.py                  (146 lines) CLI entry, argparse, REPL loop, --read/--tui dispatch
+├── mydocbot_app.py          (1054 lines) Textual TUIs — BaseNotesApp (shared) + MyDocBotApp
 │                            (read/write) + ReadOnlyApp, both extending BaseNotesApp
 ├── core/
 │   ├── __init__.py          Re-exports with __all__
 │   ├── commands.py          All CLI cmd_*(), dispatch(), resolve_editor(), export
 │   ├── config.py            Alias CRUD for write + read-only configs, history_size, 0600 perms
 │   ├── google_docs.py       OAuth, prepend_text→bool, retry, parse_entries(+readable), title cache
+│   ├── notes.py             submit_note() — the single write path (validate, flush, prepend, index, queue)
 │   ├── parser.py            Tags, search_cache, offline queue, date filters
 │   └── validation.py        validate_doc_id, validate_alias, validate_config, validate_note, validate_history_size
 ├── tests/
 │   ├── conftest.py           Fixtures: config/read-config/tags/pending paths, mock_service, doc builder
 │   ├── test_main.py          main() REPL loop, --add flag, pending count display
+│   ├── test_notes.py         submit_note(): sent/queued/rejected, offline-queue order
 │   ├── test_config.py        Config CRUD + corrupt JSON fallback (write & read)
 │   ├── test_parser.py        Tags, parse_entries, retry, search, corrupt JSON, malformed ts
 │   ├── test_commands.py      CLI cmd_* functions, cmd_search, cmd_config, cmd_export
@@ -368,7 +374,7 @@ Note body here — multiple lines preserved.
 ## Testing
 
 ```bash
-python -m pytest tests/ -v                        # All 167 tests
+python -m pytest tests/ -v                        # All 189 tests
 python -m pytest tests/test_parser.py -v          # Parser + queue + date-filter tests
 python -m pytest tests/test_tui.py -v             # Headless Textual TUI tests
 python -m pytest tests/ -k "corrupt"              # Corrupt-JSON resilience tests
@@ -380,6 +386,7 @@ bash lint.sh                                      # ruff + mypy + pytest — all
 |---|---|
 | `test_main.py` | REPL submit/queue/flush, `--add` flag validation, pending count in prompt |
 | `test_config.py` | Load, save, resolve, corrupt JSON fallback + warning (write & read-only config) |
+| `test_notes.py` | `submit_note()`: sent / queued / rejected, queued notes written first and in order, queue-behind, all-docs flush |
 | `test_parser.py` | Tag CRUD, parse_entries, prepend_text retry, search_cache, date filters, corrupt JSON, malformed timestamps |
 | `test_commands.py` | All CLI commands: switch, list, add, remove, rename, current, tag, search, export, config, help |
 | `test_dispatch.py` | Dispatch `/remove` auto-switch to default/first/none |
@@ -387,7 +394,7 @@ bash lint.sh                                      # ruff + mypy + pytest — all
 | `test_validation.py` | `validate_doc_id`, `validate_alias`, `validate_config`, `validate_note`, `validate_history_size` |
 | `test_tui.py` | `MyDocBotApp`/`ReadOnlyApp` mounted headlessly via Textual's `run_test()`; covers `/config` (incl. the fixed dead-code bug), `/add` alias validation, read-only mount/list/current |
 
-All tests use monkeypatched Google API and temp files — no network, no OAuth. Current total: **167 passed**.
+All tests use monkeypatched Google API and temp files — no network, no OAuth. Current total: **189 passed**.
 `test_tui.py` requires `pytest-asyncio` (configured with `asyncio_mode = "auto"` in `pyproject.toml`).
 
 ---
@@ -400,7 +407,7 @@ All tests use monkeypatched Google API and temp files — no network, no OAuth. 
 - **Local-only tag index:** No historical backfill from Google Docs — only notes submitted in this install are indexed.
 - **`#tag` regex:** `#(\w+)` matches word characters only — `#project-alpha` → tag `project`. Use underscores: `#project_alpha`.
 - **Notes cache:** 500-entry cap, newest-first. Loaded from the API on startup (`history_size` most recent, default 20) and on each `/switch`; `/refresh` re-fetches, `/more` loads older entries.
-- **Offline queue:** `pending_queue.json` is deleted when empty. Queue is flushed automatically after each successful submit; use `/flush` to retry manually.
+- **Offline queue:** `pending_queue.json` is deleted when empty. The queue is flushed (all docs, oldest first) *before* each new note, because every write is a prepend at the top of the doc. Flushing stops per doc at the first failure, to keep order and to avoid one retry wait per queued note. Use `/flush` to retry manually.
 - **API retry:** Transient errors (429, 500/502/503/504, `ConnectionError`, `TimeoutError`) are retried up to 3 times with 1 s / 2 s / 4 s backoff. Non-transient errors (403, 404) are not retried.
 - **`resolve_editor()` shared:** Both CLI and TUI call the same `resolve_editor()` from `core/commands.py`. Editor fallback order: `$EDITOR` → `vim` → `nano` → `vi`.
 - **Independent read/write configs:** `docs_config.json` and `read_config.json` are separate registries so the same alias name can point to different docs (or exist in only one mode) without conflict.

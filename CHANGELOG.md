@@ -7,6 +7,13 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
 ## [Unreleased]
 
 ### Changed
+- **Offline queue:** a successful write in the TUI now retries queued notes
+  for *all* documents, like the CLI and `/flush` already did. Retrying stops
+  at the first failure for each document, so being offline costs one retry
+  wait per document instead of one per queued note. In the TUI, notes written
+  from the queue show up in the notes list right away.
+- **Internal:** every way of writing a note (CLI, CLI `/edit`, TUI, TUI
+  `/edit`) now goes through one function, `core.notes.submit_note()`.
 - **Refactor:** Extracted a shared `BaseNotesApp` base class in
   `mydocbot_app.py` for `MyDocBotApp` and `ReadOnlyApp`, which previously
   duplicated ~230 lines of near-identical logic (notes cache management,
@@ -24,6 +31,18 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   changes; `tests/test_tui.py` passes unmodified.
 
 ### Fixed
+- **Offline notes out of order:** notes written while offline used to land
+  *above* the newer note that triggered the retry. Queued notes are now
+  written first, oldest first, so the doc stays in the order you wrote
+  things. If a doc's queued notes still can't be written, new notes for it
+  wait in the queue behind them instead of jumping ahead.
+- **Tags on offline notes:** `#tags` in notes written while offline are now
+  indexed once the note is written, so they show up in `/tag` and
+  `/export <tag>`.
+- **CLI `/edit` lost notes when offline:** a failed `/edit` write is now
+  queued like any other note, instead of being silently dropped.
+- **`/edit` skipped validation:** empty or oversized editor notes are now
+  rejected like typed ones, in both the CLI and the TUI.
 - **Read-Only TUI date grouping:** `ReadOnlyApp`'s "Today"/"Yesterday" date
   separators never actually matched, because the old
   `_readable_date_header()` built its comparison key in `YY/MM/DD` order
