@@ -25,20 +25,17 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 ## Suggested order
 
-1. **A2 + B1 + B2 + B3** as one task: a single submit path fixes all three bugs.
-2. **B4:** handle expired or revoked OAuth tokens.
-3. **P1:** stop tracking personal data files (lower urgency since the repo is
+1. **B4:** handle expired or revoked OAuth tokens.
+2. **P1:** stop tracking personal data files (lower urgency since the repo is
    private; do it before F2, which moves those files anyway).
-4. **F1 + F2:** one-line capture and installing as a command.
-5. **F4:** `/tag reindex`.
+3. **F1 + F2:** one-line capture and installing as a command. F1 can call
+   `core.notes.submit_note()` directly.
+4. **F4:** `/tag reindex`.
 
 ## Bugs
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
-| B1 | **Flushed offline notes land above newer notes** | open | high | S | main.py:139-141, mydocbot_app.py submit/`/edit`, core/commands.py `/edit` | The new note is prepended *first*, then the queue is flushed. Every write goes to index 1, so a note queued at 10:00 ends up above the 11:00 note. Flush (oldest first) before prepending the new note. |
-| B2 | **Queued notes never get tag-indexed** | open | high | S | core/parser.py `flush_pending_notes()` | Only the direct-submit path calls `index_note()`, so `#tags` in notes written offline never reach `tags_index.json`. |
-| B3 | **CLI vs. TUI flush scope differs** | open | med | S | main.py:141, core/commands.py:424 vs. mydocbot_app.py:578/714 | The CLI flushes all docs (`flush_pending_notes(service)`); TUI submit flushes only `current_doc_id`. Pick one rule. |
 | B4 | **Expired/revoked OAuth token crashes the app** | open | high | S | core/google_docs.py `get_service()` | `creds.refresh(Request())` doesn't handle `RefreshError`. Delete `token.json` and restart the browser sign-in instead of showing a traceback. |
 | B5 | **Note bodies containing a date get split** | open | med | S | core/google_docs.py `parse_entries()` | Splits on any `[MM/DD/YY]`, so a body containing e.g. `[01/02/03]` becomes two entries. Anchor the split on the full `[..] (HH:MM)\|` header at line start. |
 | B6 | **No regression test for read-only "Today" label** | open | low | XS | tests/test_tui.py | Flagged in design decision #27: add a targeted test for `_date_key()` / `_format_date_header()`. |
@@ -62,7 +59,7 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 | F3 | **`/undo` last note** | open | low | M | core/google_docs.py, commands, TUI | Remove the range MyDocBot just wrote at the top of the doc, but only if the top entry still matches what was written. |
 | F4 | **`/tag reindex`** | open | med | M | core/parser.py, commands | Rebuild `tags_index.json` from the doc via `parse_entries()`. Removes the "no historical backfill" limitation (design decision #6) and repairs damage from B2. |
 | F5 | **Hyphenated tags** | open | low | XS | core/parser.py `extract_tags()` | Allow `#project-alpha` with a regex like `#([\w-]+)` (strip a trailing `-`). Today it silently becomes `#project`. Update design decision #9 and the README. |
-| F6 | **Permanent vs. transient write failures; `/queue` command** | open | med | M | core/google_docs.py `prepend_text()`, core/parser.py, commands, TUI | A bad `doc_id` or revoked permission (403/404) is queued like an offline failure and retried forever with no explanation. Don't retry permanent errors, store the last error with each queued entry, and add `/queue` to list or drop entries. |
+| F6 | **Permanent vs. transient write failures; `/queue` command** | open | med | M | core/google_docs.py `prepend_text()`, core/parser.py, commands, TUI | A bad `doc_id` or revoked permission (403/404) is queued like an offline failure and retried forever with no explanation. Don't retry permanent errors, store the last error with each queued entry, and add `/queue` to list or drop entries. Since 2026-10-23 a doc whose queued note keeps failing also keeps its *new* notes queued behind it (by design, to keep order), so this matters more. |
 | F7 | **Configurable note formats per alias** | open | low | L | core/google_docs.py, core/config.py | Replace the two hard-coded parsers with a format setting per alias, so the read-only TUI can browse other doc layouts without new code. |
 | F8 | **Tag autocomplete in TUI** | open | low | M | mydocbot_app.py | Suggest known tags from `tags_index.json` when the user types `#` in the read/write TUI input (`on_text_area_changed`). |
 | F9 | **Multi-doc tag aggregation** | open | low | S | core/commands.py `cmd_tag_*`, mydocbot_app.py | An `--all` flag for `/tag` commands to aggregate across all configured docs, not just the active one. |
@@ -71,9 +68,8 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
-| A1 | **One timestamp helper** | open | med | XS | main.py, core/commands.py:393, mydocbot_app.py:572/709 | `strftime("[%m/%d/%y] (%H:%M)\|")` is copied in 4 places. Add `format_timestamp()` / `parse_timestamp()` in `core/` (same spirit as the "no duplicated magic numbers" rule). |
-| A2 | **One note-submission function** | open | high | M | new `core.submit_note()`; callers in main.py, core/commands.py, mydocbot_app.py | "Validate → prepend → index → flush → queue on failure" is written out 4 times (CLI, CLI `/edit`, TUI, TUI `/edit`); that copying is how B1–B3 happened. Do it together with B1/B2/B3. |
-| A3 | **Keep the TUI responsive during network calls** | open | med | M | mydocbot_app.py | Run API calls in Textual workers with a loading indicator. With retry backoff a call can block ~7 s, not the 200–500 ms assumed in design decision #3. |
+| A1 | **Timestamp parsing helper** | open | low | XS | core/parser.py `filter_tag_entries_by_date()`, mydocbot_app.py `MyDocBotApp._date_key()`, core/google_docs.py `parse_entries()` | The *formatting* half is done: `core.notes.format_timestamp()` / `TIMESTAMP_FORMAT` (2026-10-23, with A2). Parsing still slices `ts[1:9]` and re-states the format in regexes. Add `parse_timestamp()` next to `format_timestamp()`. |
+| A3 | **Keep the TUI responsive during network calls** | open | med | M | mydocbot_app.py | Run API calls in Textual workers with a loading indicator. With retry backoff a call can block ~7 s, not the 200–500 ms assumed in design decision #3. Since 2026-10-23 a submit flushes the queue first, so offline it blocks ~7 s per doc that has queued notes (it stops at the first failure per doc). |
 | A4 | **Merge duplicated text-extraction code** | open | low | XS | core/google_docs.py | `parse_entries()` and `parse_entries_readable()` share their first 12 lines word for word; extract `_doc_text(doc)`. |
 | A5 | **True pagination for `/more`** | open | low | M | mydocbot_app.py `cmd_more()`, core/google_docs.py | `/more` re-downloads and re-parses the whole doc to show a few older notes: `O(doc size)` per call as the doc grows. |
 | A6 | **File locking for concurrent CLI + TUI use** | open | low | M | core/config.py, core/parser.py | No locking around `docs_config.json`, `read_config.json`, `tags_index.json`, `pending_queue.json` when the CLI and a TUI run against the same directory at once. Atomic write-then-rename is a cheaper first step. |

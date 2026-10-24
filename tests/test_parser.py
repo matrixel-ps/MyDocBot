@@ -394,7 +394,68 @@ class TestPendingQueue:
 
     def test_flush_empty_queue(self, tmp_pending_path, mock_service):
         result = prs.flush_pending_notes(mock_service)
-        assert result == 0
+        assert result == []
+
+
+class TestFlushOrder:
+    """B1: flush writes oldest first and stops per doc at the first failure."""
+
+    def test_returns_sent_entries_oldest_first(self, tmp_pending_path, tmp_tags_index_path):
+        from conftest import RecordingService
+        prs.queue_note("first", "doc_1", "t1")
+        prs.queue_note("second", "doc_1", "t2")
+        service = RecordingService()
+        sent = prs.flush_pending_notes(service)
+        assert [e["text"] for e in sent] == ["first", "second"]
+        assert service.calls == [("doc_1", "t1 first"), ("doc_1", "t2 second")]
+        assert prs.count_pending() == 0
+
+    def test_stops_at_first_failure_per_doc(self, tmp_pending_path, tmp_tags_index_path, monkeypatch):
+        from conftest import RecordingService
+        monkeypatch.setattr('core.google_docs.time.sleep', lambda s: None)
+        prs.queue_note("a1", "doc_a", "t1")
+        prs.queue_note("b1", "doc_b", "t2")
+        prs.queue_note("a2", "doc_a", "t3")
+        service = RecordingService(failing={"doc_a"})
+        sent = prs.flush_pending_notes(service)
+        assert [e["text"] for e in sent] == ["b1"]
+        # a2 was never tried, so the failing doc cost one retry cycle, not two.
+        assert service.calls == [("doc_b", "t2 b1")]
+        assert [e["text"] for e in prs.load_pending_notes()] == ["a1", "a2"]
+
+    def test_count_pending_per_doc(self, tmp_pending_path):
+        prs.queue_note("a1", "doc_a", "t1")
+        prs.queue_note("b1", "doc_b", "t2")
+        prs.queue_note("a2", "doc_a", "t3")
+        assert prs.count_pending() == 3
+        assert prs.count_pending("doc_a") == 2
+        assert prs.count_pending("doc_c") == 0
+
+
+class TestFlushIndexesTags:
+    """B2: notes written offline get their #tags indexed once flushed."""
+
+    def test_flushed_note_is_indexed_with_queued_timestamp(self, tmp_pending_path, tmp_tags_index_path):
+        from conftest import RecordingService
+        prs.queue_note("offline #work note", "doc_1", "[10/23/26] (09:00)|")
+        assert len(prs.flush_pending_notes(RecordingService())) == 1
+        entries = prs.load_tags_index()["work"]
+        assert entries == [{"ts": "[10/23/26] (09:00)|", "doc_id": "doc_1", "preview": "offline #work note"}]
+
+    def test_failed_flush_is_not_indexed(self, tmp_pending_path, tmp_tags_index_path, monkeypatch):
+        from conftest import RecordingService
+        monkeypatch.setattr('core.google_docs.time.sleep', lambda s: None)
+        prs.queue_note("offline #work note", "doc_1", "[10/23/26] (09:00)|")
+        assert prs.flush_pending_notes(RecordingService(failing={"doc_1"})) == []
+        assert prs.load_tags_index() == {}
+        assert prs.count_pending() == 1
+
+    def test_reindexing_same_note_does_not_duplicate(self, tmp_pending_path, tmp_tags_index_path):
+        from conftest import RecordingService
+        prs.index_note("offline #work note", "[10/23/26] (09:00)|", "doc_1", "offline #work note")
+        prs.queue_note("offline #work note", "doc_1", "[10/23/26] (09:00)|")
+        prs.flush_pending_notes(RecordingService())
+        assert len(prs.load_tags_index()["work"]) == 1
 
 
 class TestLoadTagsIndexCorrupt:

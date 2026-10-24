@@ -1,8 +1,7 @@
 import argparse
-from datetime import datetime
 
-from core import config, google_docs, parser, validation
-from core.commands import dispatch
+from core import config, google_docs, notes, parser, validation
+from core.commands import dispatch, queued_message
 
 
 def main():
@@ -130,23 +129,17 @@ def main():
             continue
 
         full_note = "\n".join(lines)
-        valid, msg = validation.validate_note(full_note)
-        if not valid:
-            print(f"Note rejected: {msg}")
-            continue
-        timestamp = datetime.now().strftime("[%m/%d/%y] (%H:%M)|")
-        entry_with_time = f"{timestamp} {full_note}"
-        if google_docs.prepend_text(service, current_doc_id, entry_with_time):
-            parser.index_note(full_note, timestamp, current_doc_id, full_note)
-            flushed = parser.flush_pending_notes(service)
+        result = notes.submit_note(service, current_doc_id, full_note)
+        if result.status == "rejected":
+            print(f"Note rejected: {result.reason}")
+        elif result.status == "sent":
             doc_label = current_title or current_doc_id[:20] + "..."
-            msg = f"--- Prepended to \"{doc_label}\" on {timestamp} ---"
-            if flushed:
-                msg += f" (flushed {flushed} pending)"
+            msg = f"--- Prepended to \"{doc_label}\" on {result.timestamp} ---"
+            if result.flushed:
+                msg += f" (flushed {len(result.flushed)} pending)"
             print(msg)
         else:
-            parser.queue_note(full_note, current_doc_id, timestamp)
-            print(f"--- Queued note (offline). {parser.count_pending()} pending. Use /flush to retry. ---")
+            print(queued_message(result))
 
 
 if __name__ == '__main__':

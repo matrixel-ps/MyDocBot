@@ -7,7 +7,7 @@ import tempfile
 import textwrap
 from datetime import datetime
 
-from . import config, google_docs, parser, validation
+from . import config, google_docs, notes, parser, validation
 
 
 def resolve_editor():
@@ -75,6 +75,15 @@ def export_to_markdown(entries, filepath=None):
             text = e.get("text", e.get("preview", ""))
             f.write(f"## {ts}\n\n{text}\n\n---\n\n")
     return path
+
+
+def queued_message(result):
+    """CLI message for a submit_note() result with status "queued"."""
+    if result.queued_behind:
+        reason = f"behind {result.queued_behind} earlier note(s) still pending for this doc"
+    else:
+        reason = "(offline)"
+    return f"--- Queued note {reason}. {parser.count_pending()} pending. Use /flush to retry. ---"
 
 
 def cmd_export(service, svc_config, current_alias, current_doc_id, args):
@@ -390,11 +399,16 @@ def dispatch(service, svc_config, line, current_alias, current_doc_id):
         else:
             content = open_editor()
             if content:
-                timestamp = datetime.now().strftime("[%m/%d/%y] (%H:%M)|")
-                entry_with_time = f"{timestamp} {content}"
-                if google_docs.prepend_text(service, current_doc_id, entry_with_time):
-                    parser.index_note(content, timestamp, current_doc_id, content)
-                    print(f"--- Prepended editor content on {timestamp} ---")
+                result = notes.submit_note(service, current_doc_id, content)
+                if result.status == "rejected":
+                    print(f"Note rejected: {result.reason}")
+                elif result.status == "sent":
+                    msg = f"--- Prepended editor content on {result.timestamp} ---"
+                    if result.flushed:
+                        msg += f" (flushed {len(result.flushed)} pending)"
+                    print(msg)
+                else:
+                    print(queued_message(result))
     elif command == '/list':
         cmd_list(service, svc_config, current_alias)
     elif command == '/add':
@@ -421,7 +435,7 @@ def dispatch(service, svc_config, line, current_alias, current_doc_id):
     elif command == '/rename':
         cmd_rename(svc_config, args)
     elif command == '/flush':
-        flushed = parser.flush_pending_notes(service)
+        flushed = len(parser.flush_pending_notes(service))
         pending = parser.count_pending()
         if flushed:
             print(f"Flushed {flushed} pending notes.")

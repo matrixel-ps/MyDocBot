@@ -10,6 +10,7 @@ from .config import (
     save_read_config,
 )
 from .google_docs import fetch_doc_title, get_service, parse_entries, parse_entries_readable, prepend_text
+from .notes import SubmitResult, format_timestamp, submit_note
 from .parser import (
     count_pending,
     extract_tags,
@@ -34,4 +35,5 @@ __all__ = [
     "export_to_markdown",
     "extract_tags", "index_note", "load_tags_index", "save_tags_index",
     "search_cache", "queue_note", "flush_pending_notes", "count_pending",
+    "SubmitResult", "format_timestamp", "submit_note",
 ]

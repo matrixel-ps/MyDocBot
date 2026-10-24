@@ -11,7 +11,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.widgets import Button, Label, ListItem, ListView, RichLog, Static, TextArea
 
-from core import config, google_docs, parser, validation
+from core import config, google_docs, notes, parser, validation
 from core.commands import export_to_markdown, resolve_editor
 
 # Maximum number of notes kept in the in-memory session cache (per app instance),
@@ -563,29 +563,41 @@ class MyDocBotApp(BaseNotesApp):
             self.handle_command(text)
             return
 
-        valid, msg = validation.validate_note(text)
-        if not valid:
-            self.update_status(f"Note rejected: {msg}")
+        result = notes.submit_note(self._service, self.current_doc_id, text)
+        if result.status == "rejected":
+            self.update_status(f"Note rejected: {result.reason}")
             return
 
         input_bar.text = ""
-        timestamp = datetime.now().strftime("[%m/%d/%y] (%H:%M)|")
-        entry = f"{timestamp} {text}"
-
-        if google_docs.prepend_text(self._service, self.current_doc_id, entry):
-            parser.index_note(text, timestamp, self.current_doc_id, text)
-            self._add_to_cache(timestamp, text, self.current_doc_id)
-            flushed = parser.flush_pending_notes(self._service, self.current_doc_id)
+        self._add_flushed_to_cache(result.flushed)
+        if result.status == "sent":
+            self._add_to_cache(result.timestamp, text, self.current_doc_id)
             tags = parser.extract_tags(text)
             tag_str = ' '.join(f'#{t}' for t in tags) if tags else '(no tags)'
             status = f"Prepended  |  {tag_str}"
-            if flushed:
-                status += f" (flushed {flushed})"
+            if result.flushed:
+                status += f" (flushed {len(result.flushed)})"
             self.refresh_ui()
             self.update_status(status)
         else:
-            parser.queue_note(text, self.current_doc_id, timestamp)
-            self.update_status(f"Offline — queued. {parser.count_pending()} pending. /flush to retry.")
+            if result.flushed:
+                self.refresh_ui()
+            self.update_status(self._queued_status(result) + " /flush to retry.")
+
+    def _add_flushed_to_cache(self, entries):
+        """Add notes just written from the offline queue to the notes list.
+        `entries` is oldest first and each was prepended in turn, so adding
+        them in order (each goes to the top) matches the doc."""
+        for entry in entries:
+            if entry["doc_id"] == self.current_doc_id:
+                self._add_to_cache(entry["ts"], entry["text"], entry["doc_id"])
+
+    @staticmethod
+    def _queued_status(result):
+        if result.queued_behind:
+            return (f"Queued behind {result.queued_behind} pending note(s) for this doc. "
+                    f"{parser.count_pending()} pending.")
+        return f"Offline — queued. {parser.count_pending()} pending."
 
     def on_button_pressed(self, event):
         if event.button.id == "submit-btn":
@@ -616,7 +628,11 @@ class MyDocBotApp(BaseNotesApp):
         elif command == '/search':
             self.cmd_search(args)
         elif command == '/flush':
-            flushed = parser.flush_pending_notes(self._service)
+            sent = parser.flush_pending_notes(self._service)
+            flushed = len(sent)
+            if sent:
+                self._add_flushed_to_cache(sent)
+                self.refresh_ui()
             pending = parser.count_pending()
             parts = []
             if flushed:
@@ -706,20 +722,22 @@ class MyDocBotApp(BaseNotesApp):
             if not content:
                 self.update_status("Empty note")
                 return
-            timestamp = datetime.now().strftime("[%m/%d/%y] (%H:%M)|")
-            entry = f"{timestamp} {content}"
-            if google_docs.prepend_text(self._service, self.current_doc_id, entry):
-                parser.index_note(content, timestamp, self.current_doc_id, content)
-                self._add_to_cache(timestamp, content, self.current_doc_id)
-                flushed = parser.flush_pending_notes(self._service, self.current_doc_id)
+            result = notes.submit_note(self._service, self.current_doc_id, content)
+            if result.status == "rejected":
+                self.update_status(f"Note rejected: {result.reason}")
+                return
+            self._add_flushed_to_cache(result.flushed)
+            if result.status == "sent":
+                self._add_to_cache(result.timestamp, content, self.current_doc_id)
                 status = "Prepended editor content"
-                if flushed:
-                    status += f" (flushed {flushed})"
+                if result.flushed:
+                    status += f" (flushed {len(result.flushed)})"
                 self.refresh_ui()
                 self.update_status(status)
             else:
-                parser.queue_note(content, self.current_doc_id, timestamp)
-                self.update_status(f"Offline — queued. {parser.count_pending()} pending.")
+                if result.flushed:
+                    self.refresh_ui()
+                self.update_status(self._queued_status(result))
         finally:
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)

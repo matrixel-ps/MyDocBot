@@ -4,6 +4,8 @@ import re
 import sys
 import textwrap
 
+from . import google_docs
+
 BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 TAGS_INDEX_PATH = os.path.join(BASE_DIR, 'tags_index.json')
 PENDING_PATH = os.path.join(BASE_DIR, 'pending_queue.json')
@@ -103,29 +105,41 @@ def queue_note(text, doc_id, timestamp):
     save_pending_notes(queue)
 
 
-def count_pending():
-    return len(load_pending_notes())
+def count_pending(doc_id=None):
+    queue = load_pending_notes()
+    if doc_id is None:
+        return len(queue)
+    return sum(1 for entry in queue if entry["doc_id"] == doc_id)
 
 
-def flush_pending_notes(service, doc_id=None):
+def flush_pending_notes(service):
+    """Write queued notes for every doc, oldest first, and return the entries
+    that were written. Within a doc, stop at the first failure: every write
+    goes to the top of the doc, so writing a later note while an earlier one
+    is still queued would put them out of order, and while offline each extra
+    attempt costs another full retry cycle."""
     queue = load_pending_notes()
     if not queue:
-        return 0
+        return []
     remaining = []
-    flushed = 0
+    sent = []
+    blocked = set()
     for entry in queue:
-        if doc_id and entry["doc_id"] != doc_id:
+        if entry["doc_id"] in blocked:
             remaining.append(entry)
             continue
-        from .google_docs import prepend_text
         timestamp = entry["ts"]
         entry_text = f"{timestamp} {entry['text']}"
-        if prepend_text(service, entry["doc_id"], entry_text):
-            flushed += 1
+        if google_docs.prepend_text(service, entry["doc_id"], entry_text):
+            # Index at flush time, not queue time: only notes that actually
+            # reached the doc are in tags_index.json.
+            index_note(entry["text"], timestamp, entry["doc_id"], entry["text"])
+            sent.append(entry)
         else:
+            blocked.add(entry["doc_id"])
             remaining.append(entry)
     save_pending_notes(remaining)
-    return flushed
+    return sent
 
 
 def filter_tag_entries_by_date(entries, since=None, until=None):

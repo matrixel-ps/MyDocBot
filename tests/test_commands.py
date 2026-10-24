@@ -314,3 +314,32 @@ class TestCmdConfig:
         from core.commands import cmd_config
         cmd_config({}, ["set", "history_size"])
         assert "Usage" in capsys.readouterr().out
+
+
+class TestDispatchEdit:
+    """CLI /edit goes through core.notes.submit_note() (A2)."""
+
+    def test_edit_queues_note_when_write_fails(self, tmp_pending_path, tmp_tags_index_path, monkeypatch, capsys):
+        from conftest import RecordingService
+
+        from core import parser as prs
+        from core.commands import dispatch
+        monkeypatch.setattr('core.google_docs.time.sleep', lambda s: None)
+        service = RecordingService(failing={"doc_1"})
+        with patch('core.commands.open_editor', return_value="from editor #work"):
+            dispatch(service, {"aliases": {"log": "doc_1"}}, "/edit", "log", "doc_1")
+        queued = prs.load_pending_notes()
+        assert [q["text"] for q in queued] == ["from editor #work"]
+        assert "Queued" in capsys.readouterr().out
+
+    def test_edit_sends_and_indexes(self, tmp_pending_path, tmp_tags_index_path):
+        from conftest import RecordingService
+
+        from core import parser as prs
+        from core.commands import dispatch
+        service = RecordingService()
+        with patch('core.commands.open_editor', return_value="from editor #work"):
+            dispatch(service, {"aliases": {"log": "doc_1"}}, "/edit", "log", "doc_1")
+        assert len(service.calls) == 1
+        assert service.calls[0][1].endswith(" from editor #work")
+        assert "work" in prs.load_tags_index()
