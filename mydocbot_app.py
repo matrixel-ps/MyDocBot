@@ -202,6 +202,7 @@ class BaseNotesApp(App):
         self.all_tags = {}
         self._last_selected_index = 0
         self._note_to_display = {}
+        self._api_busy = None  # label of the Google call in flight, e.g. "saving note"
 
     # ---- hooks subclasses must implement ----
     def _load_config(self):
@@ -251,48 +252,103 @@ class BaseNotesApp(App):
         self.init_app()
 
     def init_app(self):
-        try:
-            aliases = self.svc_config.get("aliases", {})
-            if not aliases:
-                self.show_error(self.NO_DOCS_MSG)
-                return
+        """Draw the UI right away, then load the first doc's notes in the background."""
+        aliases = self.svc_config.get("aliases", {})
+        if not aliases:
+            self.show_error(self.NO_DOCS_MSG)
+            return
+        self.current_alias = self._resolve_initial_alias(aliases)
+        doc_id = self.current_doc_id = aliases[self.current_alias]
+        self.current_title = doc_id[:20] + "..."
+        self.all_tags = parser.load_tags_index()
+        count = self._history_size
 
-            self.current_alias = self._resolve_initial_alias(aliases)
-            self.current_doc_id = aliases[self.current_alias]
-            self.current_title = google_docs.fetch_doc_title(self._service, self.current_doc_id)
-            if not self.current_title:
-                self.current_title = self.current_doc_id[:20] + "..."
-
-            recent = self._fetch_recent(self.current_doc_id, self._history_size)
+        def done(loaded):
+            title, recent = loaded
+            if title:
+                self.current_title = title
             for ts, body in reversed(recent):
-                self._add_to_cache(ts, body, self.current_doc_id)
+                self._add_to_cache(ts, body, doc_id)
+            self.refresh_ui()
 
-            self.all_tags = parser.load_tags_index()
-        except Exception as e:
-            self.show_error(f"Startup error: {e}")
-            if not self.current_alias:
-                self.current_alias = "?"
-            if not self.current_doc_id:
-                self.current_doc_id = "?"
+        def failed(e):
             self.current_title = "(error)"
+            self.refresh_ui()
+            self.show_error(f"Startup error: {e}")
 
+        self.run_api("loading notes", lambda: self._fetch_title_and_recent(doc_id, count), done, failed)
         self.refresh_ui()
 
-    def refresh_ui(self):
+    def _fetch_title_and_recent(self, doc_id, count):
+        """Worker-side: the doc's title and its `count` most recent entries."""
+        return google_docs.fetch_doc_title(self._service, doc_id), self._fetch_recent(doc_id, count)
+
+    # ---- background Google calls (A3) ----
+    def run_api(self, label, work, on_done, on_error=None):
+        """Run work() in a thread worker, then on_done(result) or on_error(exc) back
+        on the UI thread. Returns True if the call started.
+
+        work() may only call the Google API and core functions: no widgets and no
+        app state, which change only in the callbacks. One call at a time: the
+        Google client isn't thread-safe (an earlier @work version raced on
+        _service), so a request while another runs is refused, not queued."""
+        if self._refuse_if_busy():
+            return False
+        self._api_busy = label
+        self._update_header()
+        self.update_status(self._busy_text())
+        on_error = on_error or (lambda e: self.show_error(f"{label[0].upper()}{label[1:]} failed: {e}"))
+
+        def task():
+            try:
+                outcome = (on_done, work())
+            except Exception as e:
+                outcome = (on_error, e)
+            try:
+                self.call_from_thread(self._api_finished, *outcome)
+            except RuntimeError:
+                pass  # the app closed while the call was running; nothing left to update
+
+        self.run_worker(task, thread=True, group="api", exit_on_error=False)
+        return True
+
+    def _api_finished(self, callback, value):
+        self._api_busy = None
+        self._update_header()
+        self.update_status("Ready")
+        callback(value)
+
+    def _refuse_if_busy(self):
+        """Show the busy message and return True while a Google call is in flight."""
+        if not self._api_busy:
+            return False
+        self.update_status(f"Still {self._api_busy}… try again when it's done.")
+        return True
+
+    def _busy_text(self):
+        label = self._api_busy or ""
+        return f"⟳ {label[:1].upper()}{label[1:]}…"
+
+    def _update_header(self):
         header = self.query_one("#header-bar")
         doc_display = f"[bold]{md_escape(self.current_alias or '')}[/] [italic]{md_escape(self.current_title or '')}[/]"
-        status = "● Connected"
+        status = "◌ Working…" if self._api_busy else "● Connected"
         header.update(f"[b]{self.HEADER_TITLE}[/b]     {doc_display}     {status}")
+
+    def refresh_ui(self):
+        self._update_header()
 
         notes_list = self.query_one("#notes-list")
         notes_list.clear()
         doc_notes = [n for n in self.notes_cache if n["doc_id"] == self.current_doc_id]
+        idle_status = self._busy_text() if self._api_busy else "Ready"
 
         if not doc_notes:
+            empty_msg = "Loading notes…" if self._api_busy == "loading notes" else self.EMPTY_NOTES_MSG
             notes_list.append(
-                ListItem(Label(f"[#585b70]{self.EMPTY_NOTES_MSG}[/]"))
+                ListItem(Label(f"[#585b70]{empty_msg}[/]"))
             )
-            self.update_status("Ready")
+            self.update_status(idle_status)
             return
 
         current_date = None
@@ -317,7 +373,7 @@ class BaseNotesApp(App):
         notes_list.index = display_target
         self.show_note_preview(display_target)
 
-        self.update_status("Ready")
+        self.update_status(idle_status)
 
     def on_list_view_selected(self, event):
         notes_list = self.query_one("#notes-list")
@@ -378,33 +434,42 @@ class BaseNotesApp(App):
         if not doc_id:
             self.update_status(f"Unknown alias '{alias}'")
             return
-        title = google_docs.fetch_doc_title(self._service, doc_id)
-        self.current_alias = alias
-        self.current_doc_id = doc_id
-        self.current_title = title or doc_id[:20] + "..."
-        self.notes_cache = [n for n in self.notes_cache if n["doc_id"] != doc_id]
-        recent = self._fetch_recent(doc_id, self._history_size)
-        for ts, body in reversed(recent):
-            self._add_to_cache(ts, body, doc_id)
-        self._last_selected_index = 0
-        self.refresh_ui()
-        self.update_status(f"Switched to '{md_escape(alias)}' ({md_escape(title or doc_id)})")
+        count = self._history_size
+
+        def done(loaded):
+            title, recent = loaded
+            self.current_alias = alias
+            self.current_doc_id = doc_id
+            self.current_title = title or doc_id[:20] + "..."
+            self.notes_cache = [n for n in self.notes_cache if n["doc_id"] != doc_id]
+            for ts, body in reversed(recent):
+                self._add_to_cache(ts, body, doc_id)
+            self._last_selected_index = 0
+            self.refresh_ui()
+            self.update_status(f"Switched to '{md_escape(alias)}' ({md_escape(title or doc_id)})")
+
+        self.run_api("switching documents", lambda: self._fetch_title_and_recent(doc_id, count), done)
 
     def cmd_list(self):
         aliases = self.svc_config.get("aliases", {})
         if not aliases:
             self.update_status(self.NO_DOCS_LIST_MSG)
             return
-        lines = []
-        for alias, doc_id in aliases.items():
-            marker = " ← active" if alias == self.current_alias else ""
-            title = google_docs.fetch_doc_title(self._service, doc_id)
-            display = f'"{md_escape(title)}"' if title else md_escape(doc_id)
-            lines.append(f"  {md_escape(alias):<12} {display}{marker}")
-        preview = self.query_one("#preview-pane")
-        preview.clear()
-        preview.write(f"[b]{self.LIST_HEADER}[/b]\n\n" + "\n".join(lines))
-        preview.scroll_home(animate=False)
+        pairs = list(aliases.items())
+
+        def done(titles):
+            lines = []
+            for (alias, doc_id), title in zip(pairs, titles):
+                marker = " ← active" if alias == self.current_alias else ""
+                display = f'"{md_escape(title)}"' if title else md_escape(doc_id)
+                lines.append(f"  {md_escape(alias):<12} {display}{marker}")
+            preview = self.query_one("#preview-pane")
+            preview.clear()
+            preview.write(f"[b]{self.LIST_HEADER}[/b]\n\n" + "\n".join(lines))
+            preview.scroll_home(animate=False)
+
+        self.run_api("listing documents",
+                     lambda: [google_docs.fetch_doc_title(self._service, doc_id) for _, doc_id in pairs], done)
 
     def cmd_add(self, args):
         if not args or len(args) < 2:
@@ -461,55 +526,52 @@ class BaseNotesApp(App):
         preview.scroll_home(animate=False)
 
     def cmd_refresh(self):
-        try:
-            google_docs.invalidate_title_cache(self.current_doc_id)
-            title = google_docs.fetch_doc_title(self._service, self.current_doc_id)
+        doc_id = self.current_doc_id
+        count = self._history_size
+
+        def work():
+            google_docs.invalidate_title_cache(doc_id)
+            return self._fetch_title_and_recent(doc_id, count)
+
+        def done(loaded):
+            title, recent = loaded
             if title:
                 self.current_title = title
-
-            recent = self._fetch_recent(self.current_doc_id, self._history_size)
-
             existing = {(n["ts"], n["doc_id"]) for n in self.notes_cache}
             new_count = 0
             for ts, body in reversed(recent):
-                if (ts, self.current_doc_id) not in existing:
-                    self._add_to_cache(ts, body, self.current_doc_id)
+                if (ts, doc_id) not in existing:
+                    self._add_to_cache(ts, body, doc_id)
                     new_count += 1
-
             self.refresh_ui()
             self.update_status(f"Loaded {new_count} new note(s)" if new_count else "No new notes")
-        except Exception as e:
-            self.show_error(f"Refresh failed: {e}")
+
+        self.run_api("refreshing", work, done, lambda e: self.show_error(f"Refresh failed: {e}"))
 
     def cmd_more(self):
-        try:
-            doc_notes_count = sum(1 for n in self.notes_cache if n["doc_id"] == self.current_doc_id)
-            fetch_count = min(doc_notes_count + self._history_size, self.MAX_CACHE)
+        doc_id = self.current_doc_id
+        doc_notes_count = sum(1 for n in self.notes_cache if n["doc_id"] == doc_id)
+        fetch_count = min(doc_notes_count + self._history_size, self.MAX_CACHE)
 
-            if fetch_count <= doc_notes_count:
-                self.update_status("All notes loaded (cache full or end of document)")
-                return
+        if fetch_count <= doc_notes_count:
+            self.update_status("All notes loaded (cache full or end of document)")
+            return
 
-            recent = self._fetch_recent(self.current_doc_id, fetch_count)
-
+        def done(recent):
             existing = {(n["ts"], n["doc_id"]) for n in self.notes_cache}
-            new_entries = [(ts, body) for ts, body in recent
-                           if (ts, self.current_doc_id) not in existing]
-
+            new_entries = [(ts, body) for ts, body in recent if (ts, doc_id) not in existing]
             if not new_entries:
                 self.update_status("No more notes to load")
                 return
-
             for ts, body in new_entries:
-                self.notes_cache.append({"ts": ts, "text": body, "doc_id": self.current_doc_id})
-
+                self.notes_cache.append({"ts": ts, "text": body, "doc_id": doc_id})
             if len(self.notes_cache) > self.MAX_CACHE:
                 self.notes_cache[:] = self.notes_cache[:self.MAX_CACHE]
-
             self.refresh_ui()
             self.update_status(f"Loaded {len(new_entries)} more note(s)")
-        except Exception as e:
-            self.show_error(f"Load more failed: {e}")
+
+        self.run_api("loading older notes", lambda: self._fetch_recent(doc_id, fetch_count), done,
+                     lambda e: self.show_error(f"Load more failed: {e}"))
 
 
 class MyDocBotApp(BaseNotesApp):
@@ -572,18 +634,41 @@ class MyDocBotApp(BaseNotesApp):
             self.handle_command(text)
             return
 
-        result = notes.submit_note(self._service, self.current_doc_id, text)
-        if result.status == "rejected":
-            self.update_status(f"Note rejected: {result.reason}")
+        # Validate here, on the UI thread, so a rejected note never starts a call.
+        valid, reason = validation.validate_note(text)
+        if not valid:
+            self.update_status(f"Note rejected: {reason}")
             return
 
-        input_bar.text = ""
+        tags = parser.extract_tags(text)
+        tag_str = ' '.join(f'#{t}' for t in tags) if tags else '(no tags)'
+
+        def done(result):
+            input_bar.read_only = False
+            if self._apply_submit_result(result, text, f"Prepended  |  {tag_str}"):
+                input_bar.text = ""
+
+        def failed(e):
+            input_bar.read_only = False
+            self.show_error(f"Submit failed, note kept in the input: {e}")
+
+        # Read-only while the write runs, so the text can't change under it.
+        if self._start_submit(text, done, failed):
+            input_bar.read_only = True
+
+    def _start_submit(self, text, on_done, on_error):
+        doc_id = self.current_doc_id
+        return self.run_api("saving note", lambda: notes.submit_note(self._service, doc_id, text), on_done, on_error)
+
+    def _apply_submit_result(self, result, text, sent_status):
+        """Update the cache and status for a submit_note() result. False if rejected."""
+        if result.status == "rejected":
+            self.update_status(f"Note rejected: {result.reason}")
+            return False
         self._add_flushed_to_cache(result.flushed)
         if result.status == "sent":
             self._add_to_cache(result.timestamp, text, self.current_doc_id)
-            tags = parser.extract_tags(text)
-            tag_str = ' '.join(f'#{t}' for t in tags) if tags else '(no tags)'
-            status = f"Prepended  |  {tag_str}"
+            status = sent_status
             if result.flushed:
                 status += f" (flushed {len(result.flushed)})"
             self.refresh_ui()
@@ -592,6 +677,7 @@ class MyDocBotApp(BaseNotesApp):
             if result.flushed:
                 self.refresh_ui()
             self.update_status(self._queued_status(result))
+        return True
 
     def _add_flushed_to_cache(self, entries):
         """Add notes just written from the offline queue to the notes list.
@@ -634,18 +720,7 @@ class MyDocBotApp(BaseNotesApp):
         elif command == '/search':
             self.cmd_search(args)
         elif command == '/flush':
-            sent = parser.flush_pending_notes(self._service, include_permanent=True)
-            flushed = len(sent)
-            if sent:
-                self._add_flushed_to_cache(sent)
-                self.refresh_ui()
-            pending = parser.count_pending()
-            parts = []
-            if flushed:
-                parts.append(f"Flushed {flushed}")
-            if pending:
-                parts.append(f"{pending} still pending")
-            self.update_status(" | ".join(parts) if parts else "No pending notes.")
+            self.cmd_flush()
         elif command == '/queue':
             self.cmd_queue(args)
         elif command == '/refresh':
@@ -663,6 +738,22 @@ class MyDocBotApp(BaseNotesApp):
         else:
             self.update_status(f"Unknown: {command}. Type /help")
 
+    def cmd_flush(self):
+        def done(sent):
+            if sent:
+                self._add_flushed_to_cache(sent)
+                self.refresh_ui()
+            pending = parser.count_pending()
+            parts = []
+            if sent:
+                parts.append(f"Flushed {len(sent)}")
+            if pending:
+                parts.append(f"{pending} still pending")
+            self.update_status(" | ".join(parts) if parts else "No pending notes.")
+
+        self.run_api("flushing the queue",
+                     lambda: parser.flush_pending_notes(self._service, include_permanent=True), done)
+
     def cmd_remove(self, args):
         if not args:
             self.update_status("Usage: /remove <alias>")
@@ -671,6 +762,10 @@ class MyDocBotApp(BaseNotesApp):
         aliases = self.svc_config.get("aliases", {})
         if alias not in aliases:
             self.update_status(f"Alias '{alias}' not found.")
+            return
+        # Removing the active alias switches docs (a Google call), so check
+        # before changing anything rather than leave a half-done removal.
+        if alias == self.current_alias and self._refuse_if_busy():
             return
         aliases.pop(alias)
         if self.svc_config.get("default") == alias:
@@ -706,6 +801,8 @@ class MyDocBotApp(BaseNotesApp):
         self.update_status(f"Renamed '{old}' -> '{new}'")
 
     def cmd_edit(self):
+        if self._refuse_if_busy():  # don't open the editor for a note we can't save yet
+            return
         editor_parts = resolve_editor()
         if not editor_parts:
             self.update_status("No editor found. Set $EDITOR.")
@@ -730,22 +827,10 @@ class MyDocBotApp(BaseNotesApp):
             if not content:
                 self.update_status("Empty note")
                 return
-            result = notes.submit_note(self._service, self.current_doc_id, content)
-            if result.status == "rejected":
-                self.update_status(f"Note rejected: {result.reason}")
-                return
-            self._add_flushed_to_cache(result.flushed)
-            if result.status == "sent":
-                self._add_to_cache(result.timestamp, content, self.current_doc_id)
-                status = "Prepended editor content"
-                if result.flushed:
-                    status += f" (flushed {len(result.flushed)})"
-                self.refresh_ui()
-                self.update_status(status)
-            else:
-                if result.flushed:
-                    self.refresh_ui()
-                self.update_status(self._queued_status(result))
+            self._start_submit(
+                content,
+                lambda result: self._apply_submit_result(result, content, "Prepended editor content"),
+                lambda e: self.show_error(f"Submit failed: {e}"))
         finally:
             if os.path.exists(tmp_path):
                 os.unlink(tmp_path)
@@ -761,12 +846,15 @@ class MyDocBotApp(BaseNotesApp):
             return
         alias = next(iter(aliases))
         doc_id = aliases[alias]
-        title = google_docs.fetch_doc_title(self._service, doc_id)
-        self.current_alias = alias
-        self.current_doc_id = doc_id
-        self.current_title = title or doc_id[:20] + "..."
-        self.refresh_ui()
-        self.update_status(f"Switched to '{md_escape(alias)}'")
+
+        def done(title):
+            self.current_alias = alias
+            self.current_doc_id = doc_id
+            self.current_title = title or doc_id[:20] + "..."
+            self.refresh_ui()
+            self.update_status(f"Switched to '{md_escape(alias)}'")
+
+        self.run_api("switching documents", lambda: google_docs.fetch_doc_title(self._service, doc_id), done)
 
     def cmd_export(self, args):
         filepath = None
@@ -843,6 +931,8 @@ class MyDocBotApp(BaseNotesApp):
         if action is None:
             self.update_status(md_escape(QUEUE_USAGE))
             return
+        if self._refuse_if_busy():  # a running call may be rewriting the queue file
+            return
         queue = parser.load_pending_notes()
         if not 1 <= position <= len(queue):
             self.update_status(f"No queued note #{position} (there are {len(queue)}). See /queue.")
@@ -862,13 +952,15 @@ class MyDocBotApp(BaseNotesApp):
         self.update_status(f"Note #{position} now goes to '{md_escape(alias)}', on the next note you write or /flush.")
 
     def cmd_tag_reindex(self):
-        try:
-            result = parser.reindex_doc(self._service, self.current_doc_id)
-        except Exception as e:
-            self.show_error(f"Reindex failed, tag index left unchanged: {e}")
-            return
-        self.all_tags = parser.load_tags_index()
-        self.update_status(md_escape(reindex_message(result, self.current_title or self.current_alias)))
+        doc_id = self.current_doc_id
+        label = self.current_title or self.current_alias
+
+        def done(result):
+            self.all_tags = parser.load_tags_index()
+            self.update_status(md_escape(reindex_message(result, label)))
+
+        self.run_api("reindexing tags", lambda: parser.reindex_doc(self._service, doc_id), done,
+                     lambda e: self.show_error(f"Reindex failed, tag index left unchanged: {e}"))
 
     def cmd_tag_list(self):
         tags = parser.load_tags_index()

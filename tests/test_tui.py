@@ -11,14 +11,29 @@ unconditional `return` after the `show` branch made the `elif` for `set`
 unreachable, and would have raised UnboundLocalError on `preview` if the
 `if` guard were ever removed). See CHANGELOG.md.
 """
+from contextlib import asynccontextmanager
 from unittest.mock import patch
 
 import pytest
-from conftest import RecordingService
+from conftest import RecordingService, make_doc_response
 
-from core import config
+from core import config, google_docs
 from core import parser as prs
 from mydocbot_app import MyDocBotApp, ReadOnlyApp
+
+
+async def settle(app, pilot):
+    """Wait for background Google calls (A3) and let their UI callbacks run."""
+    await app.workers.wait_for_complete()
+    await pilot.pause()
+
+
+@asynccontextmanager
+async def mounted(app):
+    """run_test(), plus waiting for the startup load so commands aren't refused as busy."""
+    async with app.run_test() as pilot:
+        await settle(app, pilot)
+        yield pilot
 
 
 @pytest.fixture
@@ -45,14 +60,14 @@ def read_app(tmp_read_config_path, mock_service):
 
 @pytest.mark.asyncio
 async def test_cmd_config_show_does_not_crash(write_app):
-    async with write_app.run_test():
+    async with mounted(write_app):
         write_app.cmd_config([])
         write_app.cmd_config(['show'])
 
 
 @pytest.mark.asyncio
 async def test_cmd_config_set_history_size_updates_config(write_app):
-    async with write_app.run_test():
+    async with mounted(write_app):
         write_app.cmd_config(['set', 'history_size', '50'])
         assert write_app.svc_config['history_size'] == 50
         assert write_app._history_size == 50
@@ -63,7 +78,7 @@ async def test_cmd_config_set_history_size_updates_config(write_app):
 
 @pytest.mark.asyncio
 async def test_cmd_config_set_invalid_history_size_is_rejected(write_app):
-    async with write_app.run_test():
+    async with mounted(write_app):
         before = write_app._history_size
         write_app.cmd_config(['set', 'history_size', '99999'])
         assert write_app._history_size == before
@@ -71,20 +86,20 @@ async def test_cmd_config_set_invalid_history_size_is_rejected(write_app):
 
 @pytest.mark.asyncio
 async def test_cmd_config_unknown_key(write_app):
-    async with write_app.run_test():
+    async with mounted(write_app):
         # Should not raise; just reports an "unknown key" status message.
         write_app.cmd_config(['set', 'bogus', 'value'])
 
 
 @pytest.mark.asyncio
 async def test_cmd_config_usage_message_on_bad_args(write_app):
-    async with write_app.run_test():
+    async with mounted(write_app):
         write_app.cmd_config(['nonsense'])
 
 
 @pytest.mark.asyncio
 async def test_cmd_add_rejects_invalid_alias(write_app):
-    async with write_app.run_test():
+    async with mounted(write_app):
         before = dict(write_app.svc_config.get("aliases", {}))
         write_app.cmd_add(['bad alias', 'doc_id_0000000000'])
         assert write_app.svc_config.get("aliases", {}) == before
@@ -92,21 +107,21 @@ async def test_cmd_add_rejects_invalid_alias(write_app):
 
 @pytest.mark.asyncio
 async def test_cmd_add_accepts_valid_alias(write_app):
-    async with write_app.run_test():
+    async with mounted(write_app):
         write_app.cmd_add(['newdoc', 'doc_id_0000000000'])
         assert write_app.svc_config["aliases"]["newdoc"] == "doc_id_0000000000"
 
 
 @pytest.mark.asyncio
 async def test_read_only_app_mounts_and_lists(read_app):
-    async with read_app.run_test():
+    async with mounted(read_app):
         read_app.cmd_list()
         read_app.cmd_current()
 
 
 @pytest.mark.asyncio
 async def test_read_only_app_rejects_invalid_alias(read_app):
-    async with read_app.run_test():
+    async with mounted(read_app):
         before = dict(read_app.svc_config.get("aliases", {}))
         read_app.cmd_add(['bad alias', 'doc_id_0000000000'])
         assert read_app.svc_config.get("aliases", {}) == before
@@ -116,9 +131,10 @@ async def test_read_only_app_rejects_invalid_alias(read_app):
 async def test_submit_note_sends_and_caches(tmp_config_path, sample_config, tmp_tags_index_path, tmp_pending_path):
     service = RecordingService()
     app = _recording_app(sample_config, service)
-    async with app.run_test():
+    async with mounted(app) as pilot:
         app.query_one("#input-bar").text = "tui note #work"
         app.submit_note()
+        await settle(app, pilot)
         assert [c[1].split("| ", 1)[1] for c in service.calls] == ["tui note #work"]
         assert service.calls[0][0] == app.current_doc_id
         assert app.notes_cache[0]["text"] == "tui note #work"
@@ -132,9 +148,10 @@ async def test_submit_note_queues_when_write_fails(tmp_config_path, sample_confi
     monkeypatch.setattr('core.google_docs.time.sleep', lambda s: None)
     service = RecordingService(failing={"doc_id_123"})
     app = _recording_app(sample_config, service)
-    async with app.run_test():
+    async with mounted(app) as pilot:
         app.query_one("#input-bar").text = "offline tui note"
         app.submit_note()
+        await settle(app, pilot)
         assert [q["text"] for q in prs.load_pending_notes()] == ["offline tui note"]
         assert app.notes_cache == []
 
@@ -150,9 +167,10 @@ async def test_submit_flushes_into_list_in_doc_order(tmp_config_path, sample_con
     prs.queue_note("queued 2", "doc_id_123", "[10/23/26] (10:05)|")
     service = RecordingService()
     app = _recording_app(sample_config, service)
-    async with app.run_test():
+    async with mounted(app) as pilot:
         app.query_one("#input-bar").text = "new"
         app.submit_note()
+        await settle(app, pilot)
         assert [d for d, _ in service.calls] == ["doc_id_123", "doc_id_456", "doc_id_123", "doc_id_123"]
         doc_list = [n["text"] for n in app.notes_cache if n["doc_id"] == "doc_id_123"]
         # The doc reads top-down in reverse write order; the cache is newest first.
@@ -167,7 +185,7 @@ async def test_submit_note_rejected_keeps_input(tmp_config_path, sample_config, 
                                                 tmp_pending_path):
     service = RecordingService()
     app = _recording_app(sample_config, service)
-    async with app.run_test():
+    async with mounted(app):
         app.query_one("#input-bar").text = "x" * (51 * 1024)
         app.submit_note()
         assert service.calls == []
@@ -179,9 +197,10 @@ async def test_tag_reindex_updates_status_and_tags(write_app, monkeypatch):
     from core.parser import ReindexResult
     monkeypatch.setattr(prs, 'reindex_doc', lambda service, doc_id: ReindexResult("reindexed", 5, 2, 3, 1, 4))
     monkeypatch.setattr(prs, 'load_tags_index', lambda: {"fresh": []})
-    async with write_app.run_test():
+    async with mounted(write_app) as pilot:
         with patch.object(write_app, 'update_status') as status:
             write_app.handle_command('/tag reindex')
+            await settle(write_app, pilot)
         assert "Reindexed" in status.call_args.args[0]
         assert "5 notes, 2 tagged, 3 tags" in status.call_args.args[0]
         assert write_app.all_tags == {"fresh": []}
@@ -192,9 +211,10 @@ async def test_tag_reindex_failure_shows_error(write_app, monkeypatch):
     def fail(service, doc_id):
         raise ConnectionError("offline")
     monkeypatch.setattr(prs, 'reindex_doc', fail)
-    async with write_app.run_test():
+    async with mounted(write_app) as pilot:
         with patch.object(write_app, 'show_error') as error:
             write_app.handle_command('/tag reindex')
+            await settle(write_app, pilot)
         assert "Reindex failed" in error.call_args.args[0]
 
 
@@ -205,7 +225,7 @@ async def test_queue_list_and_drop(write_app):
          "error": {"kind": "permanent", "message": "document not found (404)"}},
         {"text": "second", "doc_id": "doc_id_123", "ts": "[10/24/26] (09:05)|"},
     ])
-    async with write_app.run_test():
+    async with mounted(write_app):
         shown = []
         with patch.object(write_app, '_show_in_preview', side_effect=shown.append), \
                 patch.object(write_app, 'update_status') as status:
@@ -221,7 +241,7 @@ async def test_queue_list_and_drop(write_app):
 @pytest.mark.asyncio
 async def test_queue_move_and_usage(write_app):
     prs.save_pending_notes([{"text": "n", "doc_id": "doc_old", "ts": "t"}])
-    async with write_app.run_test():
+    async with mounted(write_app):
         with patch.object(write_app, 'update_status') as status:
             write_app.handle_command('/queue move 1 work')
             assert "now goes to 'work'" in status.call_args.args[0]
@@ -234,6 +254,217 @@ async def test_queue_move_and_usage(write_app):
 async def test_queued_status_explains_permanent(write_app):
     from core.google_docs import WriteFailure
     from core.notes import SubmitResult
-    async with write_app.run_test():
+    async with mounted(write_app):
         text = write_app._queued_status(SubmitResult("queued", "t", failure=WriteFailure("permanent", "no permission (403)")))
         assert text.startswith("Not sent: no permission (403). Queued.")
+
+
+# ---------------------------------------------------------------------------
+# Background Google calls (A3)
+# ---------------------------------------------------------------------------
+
+class BlockingService:
+    """Mock Docs service whose execute() waits for `release` while `armed`, so a
+    test can inspect the UI mid-call. Tracks how many calls overlap."""
+
+    def __init__(self, armed=False, doc_text=""):
+        import threading
+        self.armed = armed
+        self.release = threading.Event()
+        self.entered = threading.Event()
+        self._lock = threading.Lock()
+        self.active = 0
+        self.max_active = 0
+        self.calls = []
+        self._doc = make_doc_response(doc_text)
+        self._kind = ("get", None)
+
+    def documents(self):
+        return self
+
+    def get(self, documentId=None):
+        self._kind = ("get", documentId)
+        return self
+
+    def batchUpdate(self, documentId=None, body=None):
+        self._kind = ("write", documentId)
+        return self
+
+    def execute(self):
+        with self._lock:
+            self.active += 1
+            self.max_active = max(self.max_active, self.active)
+        try:
+            kind = self._kind
+            self.entered.set()
+            if self.armed:
+                assert self.release.wait(5), "test never released the call"
+            self.calls.append(kind)
+            return self._doc if kind[0] == "get" else {}
+        finally:
+            with self._lock:
+                self.active -= 1
+
+
+async def _wait_entered(service):
+    import asyncio
+    assert await asyncio.get_running_loop().run_in_executor(None, service.entered.wait, 5)
+
+
+def _blocking_app(sample_config, service, cls=None):
+    config.save_config(sample_config)
+    with patch('mydocbot_app.google_docs.get_service', return_value=service):
+        return (cls or MyDocBotApp)()
+
+
+@pytest.mark.asyncio
+async def test_ui_stays_usable_while_a_write_runs(tmp_config_path, sample_config, tmp_tags_index_path,
+                                                  tmp_pending_path):
+    service = BlockingService()
+    app = _blocking_app(sample_config, service)
+    prs.queue_note("someone else's", "doc_id_456", "[10/24/26] (08:00)|",
+                   google_docs.WriteFailure("permanent", "document not found (404)"))
+    async with mounted(app) as pilot:
+        service.armed = True
+        service.entered.clear()
+        app.query_one("#input-bar").text = "slow note"
+        app.submit_note()
+        await _wait_entered(service)
+        await pilot.pause()
+
+        status = str(app.query_one("#status-bar").render())
+        header = str(app.query_one("#header-bar").render())
+        assert "Saving note" in status and "Working" in header
+        assert app.query_one("#input-bar").read_only
+        assert app.query_one("#input-bar").text == "slow note"
+
+        # Still responsive: non-API commands and focus changes work.
+        app.handle_command('/help')
+        await pilot.press("ctrl+n")
+        assert app.focused is app.query_one("#notes-list")
+
+        # Another Google call, a queue edit, and /edit are refused, not started.
+        for cmd in ('/refresh', '/queue drop 1', '/edit', '/remove log'):
+            app.handle_command(cmd)
+            assert "Still saving note" in str(app.query_one("#status-bar").render()), cmd
+        assert len(prs.load_pending_notes()) == 1
+        assert "log" in app.svc_config["aliases"]
+
+        service.release.set()
+        await settle(app, pilot)
+        assert app.query_one("#input-bar").text == ""
+        assert not app.query_one("#input-bar").read_only
+        assert app._api_busy is None
+        assert "Prepended" in str(app.query_one("#status-bar").render())
+        assert "Connected" in str(app.query_one("#header-bar").render())
+        assert app.notes_cache[0]["text"] == "slow note"
+    assert service.max_active == 1
+
+
+@pytest.mark.asyncio
+async def test_startup_draws_before_notes_load(tmp_config_path, sample_config, tmp_tags_index_path,
+                                               tmp_pending_path):
+    service = BlockingService(armed=True, doc_text="[10/24/26] (09:00)| loaded note")
+    app = _blocking_app(sample_config, service)
+    async with app.run_test() as pilot:
+        await _wait_entered(service)
+        await pilot.pause()
+        assert "Loading notes" in str(app.query_one("#status-bar").render())
+        assert app.notes_cache == []
+        service.release.set()
+        await settle(app, pilot)
+        assert [n["text"] for n in app.notes_cache] == ["loaded note"]
+        assert "Ready" in str(app.query_one("#status-bar").render())
+
+
+@pytest.mark.asyncio
+async def test_unexpected_submit_error_keeps_text(tmp_config_path, sample_config, tmp_tags_index_path,
+                                                  tmp_pending_path, monkeypatch):
+    app = _blocking_app(sample_config, BlockingService())
+
+    def boom(service, doc_id, text):
+        raise RuntimeError("kaboom")
+    async with mounted(app) as pilot:
+        monkeypatch.setattr('mydocbot_app.notes.submit_note', boom)
+        app.query_one("#input-bar").text = "keep me"
+        app.submit_note()
+        await settle(app, pilot)
+        assert app.query_one("#input-bar").text == "keep me"
+        assert not app.query_one("#input-bar").read_only
+        assert app._api_busy is None
+        assert "kaboom" in str(app.query_one("#status-bar").render())
+
+
+@pytest.mark.asyncio
+async def test_startup_error_is_shown_not_overwritten(tmp_config_path, sample_config, tmp_tags_index_path,
+                                                      tmp_pending_path, monkeypatch):
+    monkeypatch.setattr(MyDocBotApp, '_fetch_recent', lambda self, doc_id, count: (_ for _ in ()).throw(OSError("dns")))
+    app = _blocking_app(sample_config, BlockingService())
+    async with mounted(app):
+        assert "Startup error: dns" in str(app.query_one("#status-bar").render())
+        assert app.current_title == "(error)"
+
+
+@pytest.mark.asyncio
+async def test_switch_list_refresh_more_run_in_background(tmp_config_path, sample_config, tmp_tags_index_path,
+                                                          tmp_pending_path):
+    service = BlockingService(doc_text="[10/24/26] (09:00)| a\n[10/23/26] (09:00)| b\n")
+    app = _blocking_app(sample_config, service)
+    async with mounted(app) as pilot:
+        app.handle_command('/switch work')
+        await settle(app, pilot)
+        assert app.current_alias == "work" and app.current_doc_id == "doc_id_456"
+        assert [n["text"] for n in app.notes_cache if n["doc_id"] == "doc_id_456"] == ["a", "b"]
+
+        shown = []
+        with patch.object(app.query_one("#preview-pane"), 'write', side_effect=shown.append):
+            app.handle_command('/list')
+            await settle(app, pilot)
+        assert "Configured Documents" in shown[-1] and "← active" in shown[-1]
+
+        app.handle_command('/refresh')
+        await settle(app, pilot)
+        assert "No new notes" in str(app.query_one("#status-bar").render())
+
+        app.handle_command('/more')
+        await settle(app, pilot)
+        assert "No more notes to load" in str(app.query_one("#status-bar").render())
+    assert service.max_active == 1
+
+
+@pytest.mark.asyncio
+async def test_flush_runs_in_background(tmp_config_path, sample_config, tmp_tags_index_path, tmp_pending_path):
+    prs.queue_note("queued", "doc_id_123", "[10/24/26] (08:00)|")
+    service = BlockingService()
+    app = _blocking_app(sample_config, service)
+    async with mounted(app) as pilot:
+        app.handle_command('/flush')
+        await settle(app, pilot)
+        assert "Flushed 1" in str(app.query_one("#status-bar").render())
+        assert app.notes_cache[0]["text"] == "queued"
+        assert prs.count_pending() == 0
+
+
+@pytest.mark.asyncio
+async def test_remove_active_alias_switches_in_background(tmp_config_path, sample_config, tmp_tags_index_path,
+                                                          tmp_pending_path):
+    app = _blocking_app(sample_config, BlockingService())
+    async with mounted(app) as pilot:
+        app.handle_command('/remove log')
+        await settle(app, pilot)
+        assert "log" not in app.svc_config["aliases"]
+        assert app.current_alias == "work"
+
+
+@pytest.mark.asyncio
+async def test_read_only_app_switch_in_background(tmp_read_config_path):
+    config.save_read_config({"default": "a", "aliases": {"a": "doc_r1", "b": "doc_r2"}})
+    service = BlockingService(doc_text="24/10/2026\n[9.30]\nread note\n")
+    with patch('mydocbot_app.google_docs.get_service', return_value=service):
+        app = ReadOnlyApp()
+    async with mounted(app) as pilot:
+        assert [n["text"] for n in app.notes_cache] == ["read note"]
+        app.handle_command('/switch b')
+        await settle(app, pilot)
+        assert app.current_doc_id == "doc_r2"
+    assert service.max_active == 1

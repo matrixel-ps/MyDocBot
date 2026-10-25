@@ -25,10 +25,10 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 ## Suggested order
 
-1. **A3:** keep the TUI responsive during network calls (reindex and offline
-   submits can block for seconds).
-2. **B9:** retry DNS failures like other network errors.
-3. **B8:** make `/search` mean the same thing in the CLI and TUI.
+1. **B9:** retry DNS failures like other network errors (the TUI no longer
+   freezes during retries since A3).
+2. **B8:** make `/search` mean the same thing in the CLI and TUI.
+3. **P2:** split runtime vs. dev dependencies and pin the lint tools.
 
 ## Bugs
 
@@ -37,7 +37,7 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 | B6 | **No regression test for read-only "Today" label** | open | low | XS | tests/test_tui.py | Flagged in design decision #27: add a targeted test for `_date_key()` / `_format_date_header()`. |
 | B7 | **User input not escaped in TUI status messages** | open | low | XS | mydocbot_app.py `update_status()` callers, e.g. :370, :763, :822 | Aliases, tags, and validation messages are interpolated into Rich markup unescaped (`show_error()` already escapes). Input containing `[...]` can be swallowed or mis-styled. Carried over from CHANGELOG "Not Yet Done". |
 | B8 | **`/search` means different things in CLI and TUI** | open | med | S | core/commands.py `cmd_search()`, mydocbot_app.py `BaseNotesApp.cmd_search()` | The CLI fetches fresh from the API; both TUIs search only the session cache. Unify, or at least say so in `/help`. |
-| B9 | **DNS failures skip the retry backoff** | open | med | XS | core/google_docs.py `_api_call_with_retry()` | `httplib2.ServerNotFoundError` (no DNS, a common "offline" case) subclasses `HttpLib2Error`, not `ConnectionError`, so it isn't retried; the write fails at once. F6 classifies it as transient for messages, but retry should treat it like other network errors. Weigh against A3: each retry cycle blocks ~7 s. |
+| B9 | **DNS failures skip the retry backoff** | open | med | XS | core/google_docs.py `_api_call_with_retry()` | `httplib2.ServerNotFoundError` (no DNS, a common "offline" case) subclasses `HttpLib2Error`, not `ConnectionError`, so it isn't retried; the write fails at once. F6 classifies it as transient for messages, but retry should treat it like other network errors. Each retry cycle takes ~7 s; since A3 the TUI stays usable meanwhile, but the CLI and one-shot mode still wait. |
 
 ## Privacy & repo hygiene
 
@@ -61,7 +61,6 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
 | A1 | **Timestamp parsing helper** | open | low | XS | core/parser.py `filter_tag_entries_by_date()`, mydocbot_app.py `MyDocBotApp._date_key()`, core/google_docs.py `parse_entries()` | The *formatting* half is done: `core.notes.format_timestamp()` / `TIMESTAMP_FORMAT` (2026-10-23, with A2). Parsing still slices `ts[1:9]` and re-states the format in regexes. Add `parse_timestamp()` next to `format_timestamp()`. |
-| A3 | **Keep the TUI responsive during network calls** | open | med | M | mydocbot_app.py | Run API calls in Textual workers with a loading indicator. With retry backoff a call can block ~7 s, not the 200–500 ms assumed in design decision #3. Since 2026-10-23 a submit flushes the queue first, so offline it blocks ~7 s per doc that has queued notes (it stops at the first failure per doc). |
 | A4 | **Merge duplicated text-extraction code** | open | low | XS | core/google_docs.py | `parse_entries()` and `parse_entries_readable()` share their first 12 lines word for word; extract `_doc_text(doc)`. |
 | A5 | **True pagination for `/more`** | open | low | M | mydocbot_app.py `cmd_more()`, core/google_docs.py | `/more` re-downloads and re-parses the whole doc to show a few older notes: `O(doc size)` per call as the doc grows. |
 | A6 | **File locking for concurrent CLI + TUI use** | open | low | M | core/config.py, core/parser.py | No locking around `docs_config.json`, `read_config.json`, `tags_index.json`, `pending_queue.json` when the CLI and a TUI run against the same directory at once. Atomic write-then-rename is a cheaper first step. |
