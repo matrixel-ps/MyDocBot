@@ -799,3 +799,57 @@ class TestDateFilterFourDigitYear:
 
     def test_until_four_digit_year_excludes_later_note(self):
         assert prs.filter_tag_entries_by_date(self.ENTRY, until="05/31/2026") == []
+
+
+def _doc(*paragraphs, extra=()):
+    """A Docs body: each paragraph is a list of text-run strings; `extra` adds non-paragraph elements."""
+    content = [{"paragraph": {"elements": [{"textRun": {"content": run}} for run in runs]}}
+               for runs in paragraphs]
+    return {"body": {"content": [*extra, *content]}}
+
+
+class TestDocTextExtraction:
+    """A4 characterization: both parsers read the body the same way. Written
+    before extracting _doc_text(), and must pass unchanged after."""
+
+    def test_write_parser_joins_runs_and_paragraphs(self):
+        doc = _doc(["[06/18/26] (10:00)| first ", "run #a\n"], ["\n"], ["[06/17/26] (09:00)| older\n"])
+        assert parse_entries(doc, count=None) == [
+            ("[06/18/26] (10:00)|", "first run #a"), ("[06/17/26] (09:00)|", "older")]
+
+    def test_write_parser_skips_non_paragraph_elements(self):
+        doc = _doc(["[06/18/26] (10:00)| kept\n"], extra=[{"sectionBreak": {}}, {"table": {"rows": 1}}])
+        assert parse_entries(doc) == [("[06/18/26] (10:00)|", "kept")]
+
+    def test_write_parser_elements_without_text_runs(self):
+        doc = {"body": {"content": [{"paragraph": {"elements": [{"inlineObjectElement": {}},
+                                                                 {"textRun": {"content": "[06/18/26] (10:00)| x\n"}}]}}]}}
+        assert parse_entries(doc) == [("[06/18/26] (10:00)|", "x")]
+
+    @pytest.mark.parametrize("doc", [{}, {"body": {}}, {"body": {"content": []}}])
+    def test_empty_or_missing_body(self, doc):
+        from core.google_docs import parse_entries_readable
+        assert parse_entries(doc) == []
+        assert parse_entries_readable(doc) == []
+
+    def test_readable_parser_joins_runs_and_skips_non_paragraphs(self):
+        from core.google_docs import parse_entries_readable
+        doc = _doc(["24/10/2026\n"], ["[10.", "30]\n"], ["read ", "note\n"], extra=[{"table": {}}])
+        assert parse_entries_readable(doc, count=5) == [("[24/10/2026] [10.30]|", "read note")]
+
+    def test_readable_parser_normalises_crlf(self):
+        from core.google_docs import parse_entries_readable
+        doc = _doc(["24/10/2026\r\n[10.30]\r\nline one\r\nline two\r", "\n"])
+        assert parse_entries_readable(doc, count=5) == [("[24/10/2026] [10.30]|", "line one\nline two")]
+
+    def test_write_parser_keeps_crlf_as_is(self):
+        """Only the read-only parser normalises line endings (unchanged by A4)."""
+        doc = _doc(["[06/18/26] (10:00)| a\r\nb\n"])
+        assert parse_entries(doc) == [("[06/18/26] (10:00)|", "a\r\nb")]
+
+    def test_count_slicing(self):
+        from core.google_docs import parse_entries_readable
+        write = _doc(*[[f"[06/{d:02d}/26] (10:00)| n{d}\n"] for d in range(9, 4, -1)])
+        assert [b for _, b in parse_entries(write, count=2)] == ["n9", "n8"]
+        read = _doc(*[[f"{d}/06/2026\n[10.00]\nr{d}\n"] for d in range(9, 4, -1)])
+        assert [b for _, b in parse_entries_readable(read, count=2)] == ["r9", "r8"]

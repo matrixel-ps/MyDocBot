@@ -214,7 +214,9 @@ def prepend_text(service, doc_id, text):
     return try_prepend(service, doc_id, text) is None
 
 
-def parse_entries_readable(doc, count=2):
+def _doc_text(doc):
+    """All paragraph text in a Docs body, joined; non-paragraph elements (tables,
+    section breaks) and non-text runs are skipped. Shared by both parsers (A4)."""
     content = doc.get('body', {}).get('content', [])
     full_text = []
     for elem in content:
@@ -225,7 +227,11 @@ def parse_entries_readable(doc, count=2):
             run = el.get('textRun')
             if run:
                 full_text.append(run.get('content', ''))
-    text = ''.join(full_text).replace('\r\n', '\n').replace('\r', '\n')
+    return ''.join(full_text)
+
+
+def parse_entries_readable(doc, count=2):
+    text = _doc_text(doc).replace('\r\n', '\n').replace('\r', '\n')
 
     parts = re.split(
         r'(?=^\d{1,2}/\d{1,2}/\d{4}\n\[\d{1,2}\.\d{1,2}\]$)',
@@ -258,17 +264,7 @@ def parse_entries_readable(doc, count=2):
 
 
 def parse_entries(doc, count=2):
-    content = doc.get('body', {}).get('content', [])
-    full_text = []
-    for elem in content:
-        para = elem.get('paragraph')
-        if not para:
-            continue
-        for el in para.get('elements', []):
-            run = el.get('textRun')
-            if run:
-                full_text.append(run.get('content', ''))
-    text = ''.join(full_text)
+    text = _doc_text(doc)  # line endings left as-is, unlike the read-only parser
     # Only a full "[MM/DD/YY] (HH:MM)|" header at the start of a line begins a
     # new entry, so a date written inside a note body doesn't split it (B5).
     parts = re.split(f'^(?={HEADER_PATTERN})', text, flags=re.MULTILINE)
