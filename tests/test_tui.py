@@ -16,6 +16,7 @@ from unittest.mock import patch
 
 import pytest
 from conftest import RecordingService, make_doc_response
+from textual.widgets import Label
 
 from core import config, google_docs
 from core import parser as prs
@@ -624,3 +625,64 @@ async def test_previously_escaped_messages_have_no_backslashes(write_app):
         write_app.handle_command('/queue move 1 [x]')
         await pilot.pause()
         assert "\\" not in _status(write_app)
+
+
+# ---------------------------------------------------------------------------
+# "Today" / "Yesterday" date labels (B6, design decision #27)
+# ---------------------------------------------------------------------------
+
+def _freeze_now(monkeypatch, *ymd_hm):
+    """Freeze mydocbot_app's clock so date labels can't flake across midnight."""
+    from datetime import datetime as real_datetime
+
+    class Frozen(real_datetime):
+        @classmethod
+        def now(cls, tz=None):
+            return cls(*ymd_hm)
+    monkeypatch.setattr('mydocbot_app.datetime', Frozen)
+
+
+def _separator_labels(app):
+    from mydocbot_app import DateSeparator
+    return [str(sep.query_one(Label).render()).strip("─ ")
+            for sep in app.query_one("#notes-list").children if isinstance(sep, DateSeparator)]
+
+
+@pytest.mark.parametrize("ts,key", [
+    ("[24/10/2026] [9.30]|", "10/24/26"),
+    ("[5/3/2026] [9.05]|", "03/05/26"),     # single-digit day and month (DD/MM/YYYY)
+    ("[31/12/2026] [23.59]|", "12/31/26"),
+])
+def test_read_only_date_key_is_mm_dd_yy(read_app, ts, key):
+    """#27: the old read-only key was YY/MM/DD, so it never matched today's MM/DD/YY."""
+    assert read_app._date_key(ts) == key
+
+
+def test_write_date_key_is_mm_dd_yy(write_app):
+    assert write_app._date_key("[10/24/26] (09:30)|") == "10/24/26"
+
+
+@pytest.mark.parametrize("now,date_str,label", [
+    ((2026, 10, 24, 10, 0), "10/24/26", "Today"),
+    ((2026, 10, 24, 10, 0), "10/23/26", "Yesterday"),
+    ((2026, 10, 24, 10, 0), "10/22/26", "10/22/26"),
+    ((2027, 1, 1, 0, 5), "12/31/26", "Yesterday"),     # across a year boundary
+    ((2027, 1, 1, 0, 5), "01/01/27", "Today"),
+])
+def test_format_date_header(monkeypatch, now, date_str, label):
+    _freeze_now(monkeypatch, *now)
+    assert MyDocBotApp._format_date_header(date_str) == label
+
+
+@pytest.mark.asyncio
+async def test_read_only_list_labels_today_and_yesterday(tmp_read_config_path, monkeypatch):
+    """B6 end to end: read-format notes from today and yesterday get the right separators."""
+    _freeze_now(monkeypatch, 2026, 10, 24, 10, 0)
+    config.save_read_config({"default": "a", "aliases": {"a": "doc_r1"}})
+    doc = ("24/10/2026\n[10.00]\ntoday's note\n"
+           "23/10/2026\n[9.00]\nyesterday's note\n"
+           "1/10/2026\n[8.00]\nolder note\n")
+    with patch('mydocbot_app.google_docs.get_service', return_value=BlockingService(doc_text=doc)):
+        app = ReadOnlyApp()
+    async with mounted(app):
+        assert _separator_labels(app) == ["Today", "Yesterday", "10/01/26"]
