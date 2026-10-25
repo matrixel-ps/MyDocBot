@@ -22,6 +22,12 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   formatting-only edits are ignored, and a doc that can't be read sends one
   warning after 3 failed checks, not an alert every time. It only reads the
   docs and stores fingerprints, not note text.
+- **Orientation brief for AI agent sessions:**
+  `python .claude/skills/task/orient.py <backlog ID or "keywords">` prints a
+  few KB of context (the backlog row, current state, design decisions and the
+  history entries that mention the terms, and git state). `/task` and
+  `AGENTS.md` start from it instead of reading every project doc in full,
+  which cut the reading at the start of a task from ~190 KB to 6–10 KB.
 - **Coverage report:** `bash coverage.sh` shows which lines the tests
   don't reach (`--html` for a browsable report). It's informational and
   not part of `lint.sh` or CI. Install `requirements-dev.txt` for it.

@@ -59,3 +59,7 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
+| D5 | **One `/finish` skill for log-change + review-handoff** | open | low | S | .claude/skills/log-change, .claude/skills/review-handoff | Both re-read `git status`, the diff, and lint for the same change back to back. One skill reads them once, does the bookkeeping, then writes the handoff. Old names could stay as aliases. |
+| D6 | **Reuse the lint result within a task** | open | low | S | lint.sh, .claude/skills/* | Lint runs 3–4 times per task (baseline, verify, log-change, review-handoff). Save a summary (pass/fail, test count, mypy file count) keyed by a hash of `git diff HEAD`; rerun only when it changed, and print only the summary or the failures. |
+| D7 | **Run `/doc-audit` in a forked, cheaper-model context** | open | low | XS | .claude/skills/doc-audit/SKILL.md | It sweeps every doc and the code but only the findings matter. Try `context: fork` plus a `model:` setting in the frontmatter; test once before relying on it. |
+| D8 | **Shorter `/log-change` entries** | open | low | S | .claude/skills/log-change/SKILL.md | CHANGELOG and `improvement-plan.md` describe each change twice. Let history entries link the task sheet for detail instead of repeating it; keep the "why". |
