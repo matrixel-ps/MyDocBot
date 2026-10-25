@@ -139,7 +139,7 @@ timestamp format (see `parse_entries_readable()` below).
 - **OAuth flow:** Picks up existing `token.json` or launches browser consent via `google-auth-oauthlib`. If `credentials.json` is missing, `get_service()` exits with a friendly setup message instead of a raw traceback. If the saved token can't be refreshed (revoked or expired) or is unreadable, it is deleted and the browser sign-in runs again; if Google can't be reached at startup, it exits with a connection message and keeps `token.json`.
 - **Config resilience:** Corrupt `docs_config.json`, `read_config.json`, `tags_index.json`, and `pending_queue.json` all fall back gracefully with a stderr warning instead of crashing.
 - **Doc title caching:** `fetch_doc_title()` caches successful lookups in-process (keyed by `doc_id`), so `/list`, `/switch`, and startup don't repeatedly re-fetch the same title. `/refresh` invalidates the cache for the current doc so external renames are picked up.
-- **File permissions:** `token.json`, `docs_config.json`, and `read_config.json` are written with owner-only (`0600`) permissions (best-effort).
+- **Safe writes:** every data file (`docs_config.json`, `read_config.json`, `tags_index.json`, `pending_queue.json`, `token.json`) is written atomically (temp file, then rename) with owner-only (`0600`) permissions, so another MyDocBot window reading at the same moment never sees a half-written or empty file. Two windows *changing* the same file at the same instant can still lose one change (no locking yet; backlog A6).
 
 ---
 
@@ -392,17 +392,19 @@ Note body here — multiple lines preserved.
 ├── core/
 │   ├── __init__.py          Re-exports with __all__
 │   ├── commands.py          All CLI cmd_*(), dispatch(), resolve_editor(), export
-│   ├── config.py            Alias CRUD for write + read-only configs, history_size, 0600 perms
+│   ├── config.py            Alias CRUD for write + read-only configs, history_size
 │   ├── google_docs.py       OAuth, prepend_text→bool, retry, parse_entries(+readable), title cache
 │   ├── notes.py             submit_note() — the single write path (validate, flush, prepend, index, queue)
 │   ├── timestamps.py        Timestamp format: format/parse, date key, --since/--until parsing
 │   ├── parser.py            Tags, search_cache, offline queue, date filters
 │   ├── paths.py             Data directory ($MYDOCBOT_HOME / XDG / ~/.config/mydocbot), first-run migration
+│   ├── storage.py           Atomic, owner-only (0600) writes for every data file
 │   └── validation.py        validate_doc_id, validate_alias, validate_config, validate_note, validate_history_size
 ├── tests/
 │   ├── conftest.py           Fixtures: autouse data-dir isolation, config/read-config/tags/pending paths, mock_service, doc builder
 │   ├── test_main.py          main() REPL loop, --add flag, pending count display, one-shot capture
 │   ├── test_paths.py         Data-dir resolution and one-time migration
+│   ├── test_storage.py       Atomic writes: no truncated reads, 0600, cleanup on failure
 │   ├── test_notes.py         submit_note(): sent/queued/rejected, offline-queue order
 │   ├── test_timestamps.py    Timestamp format/parse round trip, date flags, header pattern
 │   ├── test_google_docs.py   get_service() sign-in: refresh, revoked/corrupt token, offline

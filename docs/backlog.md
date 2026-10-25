@@ -25,7 +25,7 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 ## Suggested order
 
-1. **A6:** atomic writes for the JSON data files (start of A6).
+1. **B11:** back up a corrupt data file before resetting it (XS).
 2. **A5:** true pagination for `/more`.
 3. **D1:** shorten the README.
 
@@ -33,6 +33,7 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
+| B11 | **A corrupt config is overwritten without a backup** | open | med | XS | core/config.py `load_config()` / `load_read_config()` | On a JSON or schema error the loader prints "Starting fresh" and immediately saves an empty config over the file, so a hand-editing typo loses every alias. Copy the bad file to `docs_config.json.corrupt` first. (The tag index and queue only *read* as empty; they're overwritten on the next save, so the same applies to them.) |
 
 ## Privacy & repo hygiene
 
@@ -54,7 +55,7 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
 | A5 | **True pagination for `/more`** | open | low | M | mydocbot_app.py `cmd_more()`, core/google_docs.py | `/more` re-downloads and re-parses the whole doc to show a few older notes: `O(doc size)` per call as the doc grows. |
-| A6 | **File locking for concurrent CLI + TUI use** | open | low | M | core/config.py, core/parser.py | No locking around `docs_config.json`, `read_config.json`, `tags_index.json`, `pending_queue.json` when the CLI and a TUI run against the same directory at once. Atomic write-then-rename is a cheaper first step. |
+| A6 | **File locking for concurrent CLI + TUI use** | open | low | M | core/storage.py, core/config.py, core/parser.py | Atomic writes are done (2026-10-24): a reader never sees an empty or partial file. What's left: two processes doing read-modify-write on the same file at the same instant (e.g. both `queue_note()`) can still lose one update. Fix with an advisory lock (`fcntl.flock` on a lock file in the data dir) around load-modify-save; POSIX-only. |
 
 ## Docs & agent workflow
 

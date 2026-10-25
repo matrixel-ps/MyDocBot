@@ -6,7 +6,7 @@ import sys
 import textwrap
 from dataclasses import dataclass
 
-from . import google_docs
+from . import google_docs, storage
 from .paths import data_path
 from .timestamps import parse_date_flag, parse_timestamp
 
@@ -39,9 +39,7 @@ def load_tags_index():
 
 
 def save_tags_index(index):
-    with open(TAGS_INDEX_PATH, 'w') as f:
-        json.dump(index, f, indent=2)
-        f.write('\n')
+    storage.write_json(TAGS_INDEX_PATH, index)  # atomic, 0600 (A6)
 
 
 def _add_note_tags(index, text, timestamp, doc_id, preview):
@@ -155,9 +153,7 @@ def load_pending_notes():
 
 def save_pending_notes(queue):
     if queue:
-        with open(PENDING_PATH, 'w') as f:
-            json.dump(queue, f, indent=2)
-            f.write('\n')
+        storage.write_json(PENDING_PATH, queue)  # atomic, 0600 (A6)
     elif os.path.exists(PENDING_PATH):
         os.unlink(PENDING_PATH)
 

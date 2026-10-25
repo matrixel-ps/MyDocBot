@@ -97,6 +97,12 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   changes; `tests/test_tui.py` passes unmodified.
 
 ### Fixed
+- **Data could be wiped when two MyDocBot windows were open:** saving a
+  file emptied it for a moment, and a window reading it right then treated
+  it as empty, then saved over it. That could erase queued notes, the tag
+  index, or your document aliases. Every data file is now written
+  atomically (a reader sees the old or new version, never an empty one) and
+  with owner-only permissions, including the tag index and offline queue.
 - **`/tag search … --since` / `--until` with a 4-digit year:** a date
   like `06/01/2026` was compared wrongly, so `--since 06/01/2026` returned
   nothing. Both `MM/DD/YY` and `MM/DD/YYYY` now work.
