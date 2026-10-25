@@ -1,6 +1,8 @@
+import json
 import os
 from unittest.mock import MagicMock, patch
 
+import pytest
 from conftest import make_doc_response
 from googleapiclient.errors import HttpError
 
@@ -156,6 +158,32 @@ class TestParseEntries:
         assert len(entries) == 1
         _, body = entries[0]
         assert body == "First real note"
+
+
+class TestParseEntriesDatesInBody:
+    """B5: only a full header at the start of a line starts a new entry."""
+
+    def test_bare_date_in_body_stays_in_note(self):
+        text = "[06/17/26] (14:30)| Due [01/02/03] then #review\n\n[06/16/26] (09:00)| Older"
+        entries = parse_entries(make_doc_response(text), count=5)
+        assert entries == [
+            ("[06/17/26] (14:30)|", "Due [01/02/03] then #review"),
+            ("[06/16/26] (09:00)|", "Older"),
+        ]
+
+    def test_full_header_mid_line_stays_in_note(self):
+        text = "[06/17/26] (14:30)| As noted in [06/10/26] (08:00)| last week #x"
+        entries = parse_entries(make_doc_response(text), count=5)
+        assert entries == [("[06/17/26] (14:30)|", "As noted in [06/10/26] (08:00)| last week #x")]
+
+    def test_date_at_start_of_body_line_without_time(self):
+        text = "[06/17/26] (14:30)| Plan\n[07/01/26] kickoff #launch"
+        entries = parse_entries(make_doc_response(text), count=5)
+        assert entries == [("[06/17/26] (14:30)|", "Plan\n[07/01/26] kickoff #launch")]
+
+    def test_count_none_returns_all(self):
+        text = "\n\n".join(f"[06/{d:02d}/26] (10:00)| note {d}" for d in range(1, 8))
+        assert len(parse_entries(make_doc_response(text), count=None)) == 7
 
 
 class TestPrependText:
@@ -509,3 +537,96 @@ class TestLoadPendingNotesCorrupt:
         result = prs.load_pending_notes()
         assert len(result) == 1
         assert result[0]["text"] == "hello"
+
+
+class TestReindexDoc:
+    """F4: rebuild one doc's tag entries from the doc text."""
+
+    DOC = (
+        "[06/18/26] (10:00)| Newest #standup with Sam\n\n"
+        "[06/17/26] (09:00)| Untagged note\n\n"
+        "[06/16/26] (08:00)| Oldest #standup #design\n"
+    )
+
+    @pytest.fixture
+    def index_path(self, tmp_path, monkeypatch):
+        path = tmp_path / 'tags_index.json'
+        monkeypatch.setattr(prs, 'TAGS_INDEX_PATH', str(path))
+        return path
+
+    def _service(self, text=None, error=None):
+        service = MagicMock()
+        execute = service.documents.return_value.get.return_value.execute
+        if error:
+            execute.side_effect = error
+        else:
+            execute.return_value = make_doc_response(text)
+        return service
+
+    def _write(self, path, index):
+        path.write_text(json.dumps(index))
+
+    def test_rebuilds_tags_oldest_first(self, index_path):
+        result = prs.reindex_doc(self._service(self.DOC), "doc_a")
+        index = json.loads(index_path.read_text())
+        assert [e["ts"] for e in index["standup"]] == ["[06/16/26] (08:00)|", "[06/18/26] (10:00)|"]
+        assert index["design"] == [{"ts": "[06/16/26] (08:00)|", "doc_id": "doc_a",
+                                    "preview": "Oldest #standup #design"}]
+        assert result == prs.ReindexResult("reindexed", notes=3, tagged_notes=2, tags=2,
+                                           entries_before=0, entries_after=3)
+
+    def test_other_docs_untouched(self, index_path):
+        other = {"ts": "[01/01/26] (00:00)|", "doc_id": "doc_b", "preview": "elsewhere"}
+        self._write(index_path, {"standup": [other], "solo": [other]})
+        prs.reindex_doc(self._service(self.DOC), "doc_a")
+        index = json.loads(index_path.read_text())
+        assert index["solo"] == [other]
+        assert index["standup"][0] == other
+        assert len(index["standup"]) == 3
+
+    def test_stale_entries_removed(self, index_path):
+        stale = {"ts": "[05/01/26] (00:00)|", "doc_id": "doc_a", "preview": "deleted note #gone"}
+        self._write(index_path, {"gone": [stale]})
+        result = prs.reindex_doc(self._service(self.DOC), "doc_a")
+        index = json.loads(index_path.read_text())
+        assert "gone" not in index
+        assert result.entries_before == 1 and result.entries_after == 3
+
+    def test_untagged_doc_clears_its_entries(self, index_path):
+        old = {"ts": "[05/01/26] (00:00)|", "doc_id": "doc_a", "preview": "x #old"}
+        self._write(index_path, {"old": [old]})
+        result = prs.reindex_doc(self._service("[06/18/26] (10:00)| no tags here\n"), "doc_a")
+        assert json.loads(index_path.read_text()) == {}
+        assert result.tagged_notes == 0 and result.entries_after == 0
+
+    def test_backup_written(self, index_path):
+        original = {"keep": [{"ts": "[01/01/26] (00:00)|", "doc_id": "doc_a", "preview": "#keep"}]}
+        self._write(index_path, original)
+        prs.reindex_doc(self._service(self.DOC), "doc_a")
+        assert json.loads((index_path.parent / 'tags_index.json.bak').read_text()) == original
+
+    def test_no_backup_when_no_index_yet(self, index_path):
+        prs.reindex_doc(self._service(self.DOC), "doc_a")
+        assert not (index_path.parent / 'tags_index.json.bak').exists()
+
+    def test_fetch_error_leaves_index_alone(self, index_path, monkeypatch):
+        monkeypatch.setattr('core.google_docs.time.sleep', lambda s: None)  # skip retry backoff
+        original = {"keep": [{"ts": "[01/01/26] (00:00)|", "doc_id": "doc_a", "preview": "#keep"}]}
+        self._write(index_path, original)
+        with pytest.raises(ConnectionError):
+            prs.reindex_doc(self._service(error=ConnectionError("offline")), "doc_a")
+        assert json.loads(index_path.read_text()) == original
+        assert not (index_path.parent / 'tags_index.json.bak').exists()
+
+    def test_zero_notes_leaves_index_alone(self, index_path):
+        original = {"keep": [{"ts": "[01/01/26] (00:00)|", "doc_id": "doc_a", "preview": "#keep"}]}
+        self._write(index_path, original)
+        result = prs.reindex_doc(self._service("Some doc in another format #keep"), "doc_a")
+        assert result.status == "no_notes"
+        assert result.entries_before == 1
+        assert json.loads(index_path.read_text()) == original
+
+    def test_date_in_body_keeps_later_tags(self, index_path):
+        """B5 + F4: tags after a date in the body are still indexed."""
+        prs.reindex_doc(self._service("[06/18/26] (10:00)| Due [07/01/26] then #review\n"), "doc_a")
+        assert "review" in json.loads(index_path.read_text())

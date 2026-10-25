@@ -257,8 +257,31 @@ def cmd_tag(service, svc_config, args, current_alias, current_doc_id):
             print("Usage: /tag search <tag> [--since MM/DD/YY] [--until MM/DD/YY]")
     elif args[0] == 'stats':
         cmd_tag_stats(svc_config, current_doc_id)
+    elif args[0] == 'reindex':
+        cmd_tag_reindex(service, current_alias, current_doc_id)
     else:
-        print("Usage: /tag list | /tag search <tag> [--since] [--until] | /tag stats")
+        print(TAG_USAGE)
+
+
+TAG_USAGE = "Usage: /tag list | /tag search <tag> [--since] [--until] | /tag stats | /tag reindex"
+
+
+def reindex_message(result, label):
+    """One-line summary of a parser.reindex_doc() result, shared by the CLI and TUI."""
+    if result.status == "no_notes":
+        return f"No notes found in \"{label}\"; tag index left unchanged."
+    return (f"Reindexed \"{label}\": {result.notes} notes, {result.tagged_notes} tagged, "
+            f"{result.tags} tags (index entries for this doc: {result.entries_before} → {result.entries_after}).")
+
+
+def cmd_tag_reindex(service, current_alias, current_doc_id):
+    label = google_docs.fetch_doc_title(service, current_doc_id) or current_alias
+    try:
+        result = parser.reindex_doc(service, current_doc_id)
+    except Exception as e:
+        print(f"Reindex failed, tag index left unchanged: {e}")
+        return
+    print(reindex_message(result, label))
 
 
 def cmd_tag_list(svc_config, current_doc_id):
@@ -377,6 +400,7 @@ def cmd_help():
     print("  /tag list                      Show all indexed tags")
     print("  /tag search <t> [--since/--until]  Find notes by tag")
     print("  /tag stats                     Tag frequency chart")
+    print("  /tag reindex                   Rebuild this doc's tags from the doc")
     print("  /config show                   Show config settings")
     print(f"  /config set history_size <n>   Set notes loaded on startup "
           f"({validation.MIN_HISTORY_SIZE}-{validation.MAX_HISTORY_SIZE})")

@@ -112,13 +112,18 @@ def _api_call_with_retry(fn, max_retries=3):
             raise
 
 
+def fetch_doc(service, doc_id):
+    """The full document body, with retry. Raises on failure."""
+    return _api_call_with_retry(
+        lambda: service.documents().get(documentId=doc_id).execute()
+    )
+
+
 def fetch_doc_title(service, doc_id, use_cache=True):
     if use_cache and doc_id in _TITLE_CACHE:
         return _TITLE_CACHE[doc_id]
     try:
-        doc = _api_call_with_retry(
-            lambda: service.documents().get(documentId=doc_id).execute()
-        )
+        doc = fetch_doc(service, doc_id)
         title = doc.get('title', '(untitled)')
         _TITLE_CACHE[doc_id] = title
         return title
@@ -202,7 +207,9 @@ def parse_entries(doc, count=2):
             if run:
                 full_text.append(run.get('content', ''))
     text = ''.join(full_text)
-    parts = re.split(r'(?=\[\d{2}/\d{2}/\d{2}\])', text)
+    # Only a full "[MM/DD/YY] (HH:MM)|" header at the start of a line begins a
+    # new entry, so a date written inside a note body doesn't split it (B5).
+    parts = re.split(r'^(?=\[\d{2}/\d{2}/\d{2}\]\s*\(\d{2}:\d{2}\)\|)', text, flags=re.MULTILINE)
     entries = []
     for part in parts:
         part = part.strip()

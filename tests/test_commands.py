@@ -343,3 +343,47 @@ class TestDispatchEdit:
         assert len(service.calls) == 1
         assert service.calls[0][1].endswith(" from editor #work")
         assert "work" in prs.load_tags_index()
+
+
+class TestTagReindex:
+    """F4: /tag reindex in the CLI."""
+
+    def _reindex(self, result=None, error=None, title="My Log"):
+        from core.commands import cmd_tag
+        with patch('core.commands.google_docs.fetch_doc_title', return_value=title), \
+                patch('core.commands.parser.reindex_doc', return_value=result, side_effect=error) as reindex:
+            cmd_tag('service', {"aliases": {}}, ['reindex'], 'log', 'doc_1')
+        return reindex
+
+    def test_prints_summary(self, capsys):
+        from core.parser import ReindexResult
+        reindex = self._reindex(ReindexResult("reindexed", 412, 57, 23, 31, 88))
+        reindex.assert_called_once_with('service', 'doc_1')
+        out = capsys.readouterr().out
+        assert 'Reindexed "My Log": 412 notes, 57 tagged, 23 tags' in out
+        assert "31 → 88" in out
+
+    def test_falls_back_to_alias_label(self, capsys):
+        from core.parser import ReindexResult
+        self._reindex(ReindexResult("reindexed", 1, 0, 0, 0, 0), title=None)
+        assert 'Reindexed "log"' in capsys.readouterr().out
+
+    def test_no_notes_message(self, capsys):
+        from core.parser import ReindexResult
+        self._reindex(ReindexResult("no_notes", entries_before=4, entries_after=4))
+        assert "No notes found" in capsys.readouterr().out
+
+    def test_failure_message(self, capsys):
+        self._reindex(error=ConnectionError("offline"))
+        out = capsys.readouterr().out
+        assert "Reindex failed" in out and "offline" in out
+
+    def test_usage_mentions_reindex(self, capsys):
+        from core.commands import cmd_tag
+        cmd_tag('service', {"aliases": {}}, ['bogus'], 'log', 'doc_1')
+        assert "/tag reindex" in capsys.readouterr().out
+
+    def test_help_mentions_reindex(self, capsys):
+        from core.commands import cmd_help
+        cmd_help()
+        assert "/tag reindex" in capsys.readouterr().out
