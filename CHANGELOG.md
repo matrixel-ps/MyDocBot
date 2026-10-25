@@ -28,6 +28,12 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   Copy it to `docs_config.json`, or keep using `python main.py --add`.
 
 ### Changed
+- **Dependencies:** `requirements.txt` now holds only runtime packages,
+  with Textual and rich pinned to the tested versions. Test and lint tools
+  (pytest, pytest-asyncio, ruff, mypy) moved to a new, pinned
+  `requirements-dev.txt`, which CI now installs. CI runs on Python 3.10
+  and 3.14 instead of 3.11 only. Installing as a command now needs
+  Textual 8 or later.
 - **`/search` searches the whole doc, in the CLI and both TUIs:** it used
   to look only at the newest notes (CLI) or the notes loaded in the session
   (TUI), so older notes were never found and the two could disagree. Both

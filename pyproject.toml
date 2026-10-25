@@ -8,14 +8,14 @@ version = "0.1.0"
 description = "Terminal note-taker that prepends timestamped notes to Google Docs"
 readme = "README.md"
 requires-python = ">=3.10"
-# Direct runtime dependencies only. requirements.txt keeps the full pinned set
-# (and the test tools, until P2 splits them out).
+# Direct runtime dependencies as ranges, for `pipx install -e .`. Exact,
+# tested pins live in requirements.txt; test/lint tools in requirements-dev.txt.
 dependencies = [
     "google-api-python-client>=2.0",
     "google-auth>=2.0",
     "google-auth-oauthlib>=1.0",
     "httplib2>=0.19",
-    "textual>=0.41.0",
+    "textual>=8.0",
     "rich>=13.0.0",
 ]
 
