@@ -241,8 +241,9 @@ def doc_text(doc):
 def parse_entries_readable(doc, count=2):
     text = doc_text(doc).replace('\r\n', '\n').replace('\r', '\n')
 
+    # The time is "[HH.MM]", but "[HH:MM]" is accepted too (and keyed with a dot).
     parts = re.split(
-        r'(?=^\d{1,2}/\d{1,2}/\d{4}\n\[\d{1,2}\.\d{1,2}\]$)',
+        r'(?=^\d{1,2}/\d{1,2}/\d{4}\n\[\d{1,2}[.:]\d{1,2}\]$)',
         text.strip(),
         flags=re.MULTILINE
     )
@@ -261,7 +262,7 @@ def parse_entries_readable(doc, count=2):
         date_match = re.match(r'^(\d{1,2})/(\d{1,2})/(\d{4})$', date_line)
         if not date_match:
             continue
-        time_match = re.match(r'^\[(\d{1,2})\.(\d{1,2})\]', time_line)
+        time_match = re.match(r'^\[(\d{1,2})[.:](\d{1,2})\]', time_line)
         if not time_match:
             continue
 
