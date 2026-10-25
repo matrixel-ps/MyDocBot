@@ -691,26 +691,35 @@ async def test_read_only_list_labels_today_and_yesterday(tmp_read_config_path, m
         assert _separator_labels(app) == ["Today", "Yesterday", "10/01/26"]
 
 
-@pytest.mark.asyncio
-async def test_read_only_list_shows_only_date_and_time(tmp_read_config_path):
-    """The read-only list rows are just date + time; the note is only in the preview."""
-    config.save_read_config({"default": "a", "aliases": {"a": "doc_r1"}})
-    doc = "24/10/2026\n[9.5]\na secret body #tag\n"
+def _app_with_one_note(cls, body, sample_config):
+    """A write or read-only app whose doc holds one note from 24 Oct 2026, 09:05."""
+    if cls is ReadOnlyApp:
+        config.save_read_config({"default": "a", "aliases": {"a": "doc_r1"}})
+        doc = f"24/10/2026\n[9.5]\n{body}\n"
+    else:
+        config.save_config(sample_config)
+        doc = f"[10/24/26] (09:05)| {body}\n"
     with patch('mydocbot_app.google_docs.get_service', return_value=BlockingService(doc_text=doc)):
-        app = ReadOnlyApp()
+        return cls()
+
+
+@pytest.mark.parametrize("cls,expected", [(MyDocBotApp, "10/24/26  09:05"), (ReadOnlyApp, "24/10/2026  09:05")])
+@pytest.mark.asyncio
+async def test_list_shows_only_date_and_time(cls, expected, tmp_config_path, tmp_read_config_path, sample_config,
+                                             tmp_tags_index_path, tmp_pending_path):
+    """List rows are just date + time; the note (and its tags) are only in the preview."""
+    app = _app_with_one_note(cls, "a secret body #tag", sample_config)
     async with mounted(app):
         item = next(c for c in app.query_one("#notes-list").children if isinstance(c, NoteItem))
-        label = str(item.query_one(Label).render())
-        assert label == "24/10/2026  09:05"
+        assert str(item.query_one(Label).render()) == expected
 
 
+@pytest.mark.parametrize("cls", [MyDocBotApp, ReadOnlyApp])
 @pytest.mark.asyncio
-async def test_read_only_preview_wraps_to_pane_width_and_reflows(tmp_read_config_path):
+async def test_preview_wraps_to_pane_width_and_reflows(cls, tmp_config_path, tmp_read_config_path, sample_config,
+                                                       tmp_tags_index_path, tmp_pending_path):
     """A long note wraps inside the preview (no sideways scroll), and re-wraps on resize."""
-    config.save_read_config({"default": "a", "aliases": {"a": "doc_r1"}})
-    doc = "24/10/2026\n[10.00]\n" + " ".join(f"word{i}" for i in range(200)) + "\n"
-    with patch('mydocbot_app.google_docs.get_service', return_value=BlockingService(doc_text=doc)):
-        app = ReadOnlyApp()
+    app = _app_with_one_note(cls, " ".join(f"word{i}" for i in range(200)), sample_config)
     async with app.run_test(size=(80, 30)) as pilot:
         await settle(app, pilot)
         preview = app.query_one("#preview-pane")

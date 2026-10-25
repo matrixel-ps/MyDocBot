@@ -72,10 +72,9 @@ BaseNotesApp (App)          shared: cache, date-grouped list, preview, run_api()
 ├── MyDocBotApp             read/write: submit, /edit, /flush, /queue, /tag, /export, /config
 └── ReadOnlyApp             browse-only, its own config and timestamp format
 
-Layout: header · notes ListView | preview · input bar · status bar
-  MyDocBotApp: list 40% (time + preview + tags) | PreviewPane (RichLog) 60%
-  ReadOnlyApp: list 24 cols (date + time, `_note_label()` hook) | WrappingPreview 1fr
-               (VerticalScroll + Static: re-wraps on resize, no sideways scroll)
+Layout (both): header · notes ListView (24 cols, date + time per note via the
+  `_note_label()` hook) | WrappingPreview (1fr; VerticalScroll + Static, re-wraps
+  on resize, no sideways scroll) · input bar · status bar
 ```
 
 - **Notes list:** `DateSeparator` items carry `_is_separator = True`;
@@ -200,4 +199,4 @@ touches real files. TUI tests use Textual's headless `run_test()` through
 | `test_dispatch.py` | `/remove` auto-switch paths |
 | `test_editor.py` | `resolve_editor()` fallback chain |
 | `test_validation.py` | Input validators |
-| `test_tui.py` | Both TUIs headless: commands, background calls (with `BlockingService`), status escaping, date labels, read-only list label and preview wrapping, `/more` cache |
+| `test_tui.py` | Both TUIs headless: commands, background calls (with `BlockingService`), status escaping, date labels, list date/time labels and preview wrapping (both apps), `/more` cache |
