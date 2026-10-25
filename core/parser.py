@@ -4,6 +4,7 @@ import re
 import shutil
 import sys
 import textwrap
+from collections import Counter
 from dataclasses import dataclass
 
 from . import google_docs, storage
@@ -58,9 +59,10 @@ def _add_note_tags(index, text, timestamp, doc_id, preview):
 def index_note(text, timestamp, doc_id, preview):
     if not extract_tags(text):
         return
-    index = load_tags_index()
-    _add_note_tags(index, text, timestamp, doc_id, preview)
-    save_tags_index(index)
+    with storage.locked(TAGS_INDEX_PATH):
+        index = load_tags_index()
+        _add_note_tags(index, text, timestamp, doc_id, preview)
+        save_tags_index(index)
 
 
 def _count_doc_entries(index, doc_id):
@@ -88,21 +90,22 @@ def reindex_doc(service, doc_id):
     """
     doc = google_docs.fetch_doc(service, doc_id)
     entries = google_docs.parse_entries(doc, count=None)
-    index = load_tags_index()
-    before = _count_doc_entries(index, doc_id)
-    if not entries:
-        return ReindexResult("no_notes", entries_before=before, entries_after=before)
+    with storage.locked(TAGS_INDEX_PATH):
+        index = load_tags_index()
+        before = _count_doc_entries(index, doc_id)
+        if not entries:
+            return ReindexResult("no_notes", entries_before=before, entries_after=before)
 
-    if os.path.exists(TAGS_INDEX_PATH):
-        shutil.copy2(TAGS_INDEX_PATH, TAGS_INDEX_PATH + '.bak')
-    index = {tag: [e for e in tag_entries if e["doc_id"] != doc_id] for tag, tag_entries in index.items()}
-    tagged = 0
-    for timestamp, body in reversed(entries):  # the doc is newest first; the index is oldest first
-        if extract_tags(body):
-            tagged += 1
-            _add_note_tags(index, body, timestamp, doc_id, body)
-    index = {tag: tag_entries for tag, tag_entries in index.items() if tag_entries}
-    save_tags_index(index)
+        if os.path.exists(TAGS_INDEX_PATH):
+            shutil.copy2(TAGS_INDEX_PATH, TAGS_INDEX_PATH + '.bak')
+        index = {tag: [e for e in tag_entries if e["doc_id"] != doc_id] for tag, tag_entries in index.items()}
+        tagged = 0
+        for timestamp, body in reversed(entries):  # the doc is newest first; the index is oldest first
+            if extract_tags(body):
+                tagged += 1
+                _add_note_tags(index, body, timestamp, doc_id, body)
+        index = {tag: tag_entries for tag, tag_entries in index.items() if tag_entries}
+        save_tags_index(index)
     doc_tags = sum(1 for tag_entries in index.values() if any(e["doc_id"] == doc_id for e in tag_entries))
     return ReindexResult("reindexed", len(entries), tagged, doc_tags, before, _count_doc_entries(index, doc_id))
 
@@ -184,9 +187,10 @@ def queue_note(text, doc_id, timestamp, failure=None):
     entry = {"text": text, "doc_id": doc_id, "ts": timestamp}
     if failure is not None:
         entry["error"] = _error_dict(failure)
-    queue = load_pending_notes()
-    queue.append(entry)
-    save_pending_notes(queue)
+    with storage.locked(PENDING_PATH):
+        queue = load_pending_notes()
+        queue.append(entry)
+        save_pending_notes(queue)
 
 
 def first_pending_failure(doc_id):
@@ -199,24 +203,26 @@ def first_pending_failure(doc_id):
 
 def drop_pending(position):
     """Remove and return the queued entry at 1-based position. Raises IndexError."""
-    queue = load_pending_notes()
-    if not 1 <= position <= len(queue):
-        raise IndexError(position)
-    entry = queue.pop(position - 1)
-    save_pending_notes(queue)
+    with storage.locked(PENDING_PATH):
+        queue = load_pending_notes()
+        if not 1 <= position <= len(queue):
+            raise IndexError(position)
+        entry = queue.pop(position - 1)
+        save_pending_notes(queue)
     return entry
 
 
 def move_pending(position, doc_id):
     """Re-target the queued entry at 1-based position to doc_id and clear its error.
     It keeps its place in the queue, so per-doc order stays oldest first."""
-    queue = load_pending_notes()
-    if not 1 <= position <= len(queue):
-        raise IndexError(position)
-    entry = queue[position - 1]
-    entry["doc_id"] = doc_id
-    entry.pop("error", None)
-    save_pending_notes(queue)
+    with storage.locked(PENDING_PATH):
+        queue = load_pending_notes()
+        if not 1 <= position <= len(queue):
+            raise IndexError(position)
+        entry = queue[position - 1]
+        entry["doc_id"] = doc_id
+        entry.pop("error", None)
+        save_pending_notes(queue)
     return entry
 
 
@@ -237,21 +243,37 @@ def flush_pending_notes(service, include_permanent=False):
     A doc whose oldest queued note last failed permanently (bad doc ID, no
     permission) is skipped unless include_permanent is set: retrying it before
     every submit can't succeed until the user fixes something. /flush sets it.
-    A failed attempt stores the new error on the entry."""
-    queue = load_pending_notes()
+    A failed attempt stores the new error on the entry.
+
+    Only one flush runs at a time across processes and threads (A6): if
+    another is in progress this returns [] at once rather than send the same
+    notes twice. The queue lock is held only to read the queue and to save the
+    result, not across the Google calls, so queue_note() elsewhere never waits
+    on a retry cycle; notes queued meanwhile are kept by _save_flush_result()."""
+    with storage.locked(PENDING_PATH + '.flush', blocking=False) as held:
+        if not held:
+            return []
+        return _flush(service, include_permanent)
+
+
+def _entry_key(entry):
+    return entry["text"], entry["ts"]
+
+
+def _flush(service, include_permanent):
+    with storage.locked(PENDING_PATH):
+        queue = load_pending_notes()
     if not queue:
         return []
-    remaining = []
     sent = []
+    failed = []
     blocked = set()
     for entry in queue:
         if entry["doc_id"] in blocked:
-            remaining.append(entry)
             continue
         stored = entry_failure(entry)
         if stored and stored.kind == "permanent" and not include_permanent:
             blocked.add(entry["doc_id"])
-            remaining.append(entry)
             continue
         timestamp = entry["ts"]
         entry_text = f"{timestamp} {entry['text']}"
@@ -264,9 +286,30 @@ def flush_pending_notes(service, include_permanent=False):
         else:
             entry["error"] = _error_dict(failure)
             blocked.add(entry["doc_id"])
-            remaining.append(entry)
-    save_pending_notes(remaining)
+            failed.append(entry)
+    _save_flush_result(sent, failed)
     return sent
+
+
+def _save_flush_result(sent, failed):
+    """Apply a flush to the queue as it is *now*: another process may have
+    queued, dropped or moved notes during the Google calls. Sent notes are
+    removed (matched by text and timestamp, one per send); a failed note gets
+    its new error, unless it was moved to another doc meanwhile."""
+    with storage.locked(PENDING_PATH):
+        to_remove = Counter(_entry_key(e) for e in sent)
+        errors = {(_entry_key(e), e["doc_id"]): e["error"] for e in failed}
+        remaining = []
+        for entry in load_pending_notes():
+            key = _entry_key(entry)
+            if to_remove[key]:
+                to_remove[key] -= 1
+                continue
+            error = errors.get((key, entry["doc_id"]))
+            if error is not None:
+                entry["error"] = error
+            remaining.append(entry)
+        save_pending_notes(remaining)
 
 
 def filter_tag_entries_by_date(entries, since=None, until=None):

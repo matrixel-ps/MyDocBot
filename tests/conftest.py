@@ -6,8 +6,9 @@ import pytest
 
 
 def _remove_with_backups(path):
-    """Delete a temp data file and any <path>.corrupt-* backups made from it (B11)."""
-    for p in [path, *glob.glob(f"{path}.corrupt-*")]:
+    """Delete a temp data file, any <path>.corrupt-* backups made from it (B11),
+    and its lock files (<path>.lock, <path>.flush.lock; A6)."""
+    for p in [path, *glob.glob(f"{path}.corrupt-*"), *glob.glob(f"{path}*.lock")]:
         if os.path.exists(p):
             os.unlink(p)
 

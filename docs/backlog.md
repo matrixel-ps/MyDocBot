@@ -25,8 +25,8 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 ## Suggested order
 
-1. **F3:** `/undo` last note.
-2. **A6:** file locking for simultaneous read-modify-write.
+1. **A6 + F10:** file locking, then the Discord bot (in progress together).
+2. **F3:** `/undo` last note.
 3. **F9:** multi-doc tag aggregation.
 
 ## Bugs
@@ -48,12 +48,14 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 | F7 | **Configurable note formats per alias** | open | low | L | core/google_docs.py, core/config.py | Replace the two hard-coded parsers with a format setting per alias, so the read-only TUI can browse other doc layouts without new code. |
 | F8 | **Tag autocomplete in TUI** | open | low | M | mydocbot_app.py | Suggest known tags from `tags_index.json` when the user types `#` in the read/write TUI input (`on_text_area_changed`). |
 | F9 | **Multi-doc tag aggregation** | open | low | S | core/commands.py `cmd_tag_*`, mydocbot_app.py | An `--all` flag for `/tag` commands to aggregate across all configured docs, not just the active one. `/tag reindex` (F4) is per-doc too; `--all` there would loop over the aliases. |
+| F10 | **Discord bot: send a note by DM** | in progress ([sheet](tasks/discord-bot.md)) | med | L | new core/discord_handler.py + adapter, pyproject.toml | DM a private bot and the message is written with `submit_note()`; `-d <alias>` picks the doc; only allowlisted Discord user IDs are acted on; short text reply. `discord.py` as an optional extra with a `mydocbot-discord` command, run always-on under `systemd --user`. Needs A6 first. |
 
 ## Architecture & refactors
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
-| A6 | **File locking for concurrent CLI + TUI use** | open | low | M | core/storage.py, core/config.py, core/parser.py | Atomic writes are done (2026-10-24): a reader never sees an empty or partial file. What's left: two processes doing read-modify-write on the same file at the same instant (e.g. both `queue_note()`) can still lose one update. Fix with an advisory lock (`fcntl.flock` on a lock file in the data dir) around load-modify-save; POSIX-only. |
+| A7 | **Config saves overwrite changes made by another process** | open | low | S | core/commands.py, mydocbot_app.py `save_config` callers, main.py | The CLI and TUI load `docs_config.json` / `read_config.json` once at startup and later save that whole session copy, so an alias added in one process is lost when another saves. A6's lock doesn't help: there is no short load-modify-save to wrap. Fix by reloading under `storage.locked()` and applying just the one change (add/remove/rename alias, set default, history size). |
+| A6 | **File locking for concurrent CLI + TUI use** | in progress ([sheet](tasks/discord-bot.md)) | low | M | core/storage.py, core/config.py, core/parser.py | Atomic writes are done (2026-10-24): a reader never sees an empty or partial file. What's left: two processes doing read-modify-write on the same file at the same instant (e.g. both `queue_note()`) can still lose one update. Fix with an advisory lock (`fcntl.flock` on a lock file in the data dir) around load-modify-save; POSIX-only. |
 
 ## Docs & agent workflow
 
