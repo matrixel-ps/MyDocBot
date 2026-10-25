@@ -13,7 +13,7 @@ jobs:
       fail-fast: false
       matrix:
         # The stated minimum (pyproject requires-python) and the local version.
-        python-version: ["3.10", "3.14"]
+        python-version: ["3.11", "3.14"]
     steps:
       - uses: actions/checkout@v4
 
