@@ -2,6 +2,7 @@ import json
 import os
 import sys
 
+from core import storage
 from core.paths import data_path
 from core.validation import DEFAULT_HISTORY_SIZE, validate_config
 
@@ -30,19 +31,8 @@ def load_config():
         return config
 
 
-def _chmod_owner_only(path):
-    """Best-effort restrict a config file to owner read/write (0600)."""
-    try:
-        os.chmod(path, 0o600)
-    except OSError:
-        pass  # platforms without POSIX permission support (e.g. some Windows setups)
-
-
 def save_config(config):
-    with open(CONFIG_PATH, 'w') as f:
-        json.dump(config, f, indent=2)
-        f.write('\n')
-    _chmod_owner_only(CONFIG_PATH)
+    storage.write_json(CONFIG_PATH, config)  # atomic, 0600 (A6)
 
 
 def resolve_alias(config, alias):
@@ -82,10 +72,7 @@ def load_read_config():
 
 
 def save_read_config(config):
-    with open(READ_CONFIG_PATH, 'w') as f:
-        json.dump(config, f, indent=2)
-        f.write('\n')
-    _chmod_owner_only(READ_CONFIG_PATH)
+    storage.write_json(READ_CONFIG_PATH, config)  # atomic, 0600 (A6)
 
 
 def resolve_read_alias(config, alias):

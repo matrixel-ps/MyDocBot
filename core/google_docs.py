@@ -14,6 +14,7 @@ from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 from httplib2 import HttpLib2Error, ServerNotFoundError
 
+from . import storage
 from .paths import data_path
 from .timestamps import HEADER_PATTERN
 
@@ -91,12 +92,7 @@ def get_service():
                 CREDENTIALS_PATH, SCOPES)
             creds = flow.run_local_server(port=0)
 
-        with open(TOKEN_PATH, 'w') as token:
-            token.write(creds.to_json())
-        try:
-            os.chmod(TOKEN_PATH, 0o600)
-        except OSError:
-            pass  # best-effort on platforms without POSIX permission support
+        storage.write_text(TOKEN_PATH, creds.to_json())  # atomic, 0600 (A6)
 
     return build('docs', 'v1', credentials=creds)
 
