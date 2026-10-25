@@ -417,6 +417,7 @@ Note body here — multiple lines preserved.
 ├── .github/workflows/ci.yml  GitHub Actions: lint.sh on Python 3.11 + 3.14, push/PR to main/dev
 ├── pyproject.toml            Package metadata + `mydocbot` entry point; ruff, mypy, pytest-asyncio config
 ├── lint.sh                   CI gate: ruff → mypy → pytest (all must pass)
+├── coverage.sh               Coverage report (report only; not part of the gate)
 ├── CHANGELOG.md               Notable changes, most-recent-first
 ├── requirements.txt          Runtime dependencies, pinned (textual, rich, google-api packages)
 └── requirements-dev.txt      requirements.txt + pinned pytest, pytest-asyncio, ruff, mypy
@@ -433,6 +434,8 @@ python -m pytest tests/test_tui.py -v             # Headless Textual TUI tests
 python -m pytest tests/ -k "corrupt"              # Corrupt-JSON resilience tests
 python -m pytest tests/test_main.py -v            # CLI REPL loop tests
 bash lint.sh                                      # ruff + mypy + pytest — all three must pass
+bash coverage.sh                                  # coverage report with missing lines (needs requirements-dev.txt)
+bash coverage.sh --html                           # same, plus htmlcov/index.html
 ```
 
 | File | Coverage |

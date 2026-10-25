@@ -25,9 +25,9 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 ## Suggested order
 
-1. **D3:** add a coverage report (XS).
-2. **A6:** atomic writes for the JSON data files (start of A6).
-3. **A5:** true pagination for `/more`.
+1. **A6:** atomic writes for the JSON data files (start of A6).
+2. **A5:** true pagination for `/more`.
+3. **D1:** shorten the README.
 
 ## Bugs
 
@@ -61,4 +61,3 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
 | D1 | **Shorten the README** | open | low | S | README.md | Still long and history-heavy in places (e.g. "Design Decisions & Known Limitations"). Keep the user-facing parts; leave history to CHANGELOG and the agent notes. |
-| D3 | **Add a coverage report** | open | low | XS | lint.sh / pyproject.toml, dev requirements | `pytest --cov` to show which parts of `mydocbot_app.py` are still untested. |

@@ -40,6 +40,14 @@ ignore = ["E501"]
 [tool.pytest.ini_options]
 asyncio_mode = "auto"
 
+[tool.coverage.run]
+# What coverage.sh measures (D3). Report only: nothing fails on a percentage.
+source = ["core", "main", "mydocbot_app"]
+
+[tool.coverage.report]
+show_missing = true
+skip_covered = true
+
 [tool.mypy]
 python_version = "3.11"
 strict = false
