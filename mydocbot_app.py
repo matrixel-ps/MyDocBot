@@ -9,7 +9,7 @@ from rich.markup import escape as md_escape
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal
+from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import Button, Label, ListItem, ListView, RichLog, Static, TextArea
 
 from core import config, google_docs, notes, parser, timestamps, validation
@@ -116,17 +116,28 @@ Screen {
     padding: 0;
     color: #585b70;
 }
+
+/* Read-only app: the list holds only date + time, the note fills the rest. */
+#notes-list.compact {
+    width: 24;
+}
+
+#preview-pane.wrapping {
+    width: 1fr;
+    overflow-x: hidden;
+}
 """
 
 
 class NoteItem(ListItem):
-    def __init__(self, timestamp, text, doc_id):
-        preview = textwrap.shorten(text, width=80, placeholder="...").replace('\n', ' ')
-        time_part = timestamp[12:17] if len(timestamp) >= 17 else timestamp
+    def __init__(self, timestamp, text, doc_id, label_text=None):
         tags = parser.extract_tags(text)
-        tag_str = f"  [#a6e3a1]{' '.join(f'#{t}' for t in tags[:3])}[/]" if tags else ""
-        label = Label(f"[{md_escape(time_part)}] {md_escape(preview)}{tag_str}")
-        super().__init__(label)
+        if label_text is None:
+            preview = textwrap.shorten(text, width=80, placeholder="...").replace('\n', ' ')
+            time_part = timestamp[12:17] if len(timestamp) >= 17 else timestamp
+            tag_str = f"  [#a6e3a1]{' '.join(f'#{t}' for t in tags[:3])}[/]" if tags else ""
+            label_text = f"[{md_escape(time_part)}] {md_escape(preview)}{tag_str}"
+        super().__init__(Label(label_text))
         self.note_ts = timestamp
         self.note_text = text
         self.note_doc_id = doc_id
@@ -160,6 +171,30 @@ class PreviewPane(RichLog):
             super()._on_key(event)
             return
         event.stop()
+
+
+class WrappingPreview(VerticalScroll):
+    """Preview pane that re-wraps its text to the pane width on every resize.
+
+    RichLog wraps once, at write time, and never narrower than its min_width
+    (78), so a narrow pane scrolled sideways. This keeps RichLog's
+    write/clear/scroll_home calls, so the shared commands work unchanged."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._parts = []
+        self._body = Static("", markup=True)
+
+    def compose(self) -> ComposeResult:
+        yield self._body
+
+    def write(self, text):
+        self._parts.append(text)
+        self._body.update("\n".join(self._parts))
+
+    def clear(self):
+        self._parts = []
+        self._body.update("")
 
 
 class BaseNotesApp(App):
@@ -236,6 +271,10 @@ class BaseNotesApp(App):
         timestamp, comparable against `_format_date_header`'s own
         `datetime.now().strftime("%m/%d/%y")` computation."""
         raise NotImplementedError
+
+    def _note_label(self, ts):
+        """Markup for a note's row in the list; None keeps NoteItem's time + preview."""
+        return None
 
     def _resolve_initial_alias(self, aliases):
         default = self.svc_config.get("default", "")
@@ -372,7 +411,7 @@ class BaseNotesApp(App):
                 current_date = date_key
                 notes_list.append(DateSeparator(self._format_date_header(date_key)))
                 display_idx += 1
-            item = NoteItem(n["ts"], n["text"], n["doc_id"])
+            item = NoteItem(n["ts"], n["text"], n["doc_id"], self._note_label(n["ts"]))
             notes_list.append(item)
             self._note_to_display[note_idx] = display_idx
             note_idx += 1
@@ -1166,6 +1205,12 @@ class ReadOnlyApp(BaseNotesApp):
         day, month, year = date_str.split("/")
         return f"{int(month):02d}/{int(day):02d}/{int(year) % 100:02d}"
 
+    def _note_label(self, ts):
+        # Date and time only ("25/10/2026  09:05"); the note itself is in the preview.
+        date_part, time_part = ts.split("] [", 1)
+        hour, minute = time_part.rstrip("]|").split(".")
+        return f"{md_escape(date_part[1:])}  [#a6e3a1]{int(hour):02d}:{int(minute):02d}[/]"
+
     def _resolve_initial_alias(self, aliases):
         if self.start_alias and self.start_alias in aliases:
             return self.start_alias
@@ -1174,8 +1219,8 @@ class ReadOnlyApp(BaseNotesApp):
     def compose(self) -> ComposeResult:
         yield Static("Connecting...", id="header-bar")
         with Horizontal(id="main-area"):
-            yield ListView(id="notes-list")
-            yield PreviewPane(id="preview-pane", max_lines=None, highlight=False, wrap=True, markup=True)
+            yield ListView(id="notes-list", classes="compact")
+            yield WrappingPreview(id="preview-pane", classes="wrapping")
         with Horizontal(id="input-area"):
             yield TextArea(id="cmd-bar", text="", placeholder="Type /command... (Ctrl+S to run)")
             yield Button("Run", id="submit-btn", variant="primary")

@@ -244,7 +244,7 @@ Type a note over one or more lines; a **blank line submits**. `exit` or
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Notes are grouped under Today, Yesterday, or a date. The list shows up to
+Notes are grouped under Today, Yesterday, or a date. The read/write list shows up to
 three `#tags` per note, and the preview highlights them.
 
 | Key | Read/write TUI | Read-only TUI |
@@ -273,7 +273,9 @@ DD/MM/YYYY
 Note body…
 ```
 
-`[HH:MM]` works too.
+`[HH:MM]` works too. Its notes list shows only each note's date and time;
+the note itself is in the preview, which wraps to the window width and
+re-wraps when you resize the terminal.
 
 ### Commands
 

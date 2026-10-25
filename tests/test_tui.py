@@ -20,7 +20,7 @@ from textual.widgets import Label
 
 from core import config, google_docs
 from core import parser as prs
-from mydocbot_app import MyDocBotApp, ReadOnlyApp
+from mydocbot_app import MyDocBotApp, NoteItem, ReadOnlyApp
 
 
 async def settle(app, pilot):
@@ -689,6 +689,37 @@ async def test_read_only_list_labels_today_and_yesterday(tmp_read_config_path, m
         app = ReadOnlyApp()
     async with mounted(app):
         assert _separator_labels(app) == ["Today", "Yesterday", "10/01/26"]
+
+
+@pytest.mark.asyncio
+async def test_read_only_list_shows_only_date_and_time(tmp_read_config_path):
+    """The read-only list rows are just date + time; the note is only in the preview."""
+    config.save_read_config({"default": "a", "aliases": {"a": "doc_r1"}})
+    doc = "24/10/2026\n[9.5]\na secret body #tag\n"
+    with patch('mydocbot_app.google_docs.get_service', return_value=BlockingService(doc_text=doc)):
+        app = ReadOnlyApp()
+    async with mounted(app):
+        item = next(c for c in app.query_one("#notes-list").children if isinstance(c, NoteItem))
+        label = str(item.query_one(Label).render())
+        assert label == "24/10/2026  09:05"
+
+
+@pytest.mark.asyncio
+async def test_read_only_preview_wraps_to_pane_width_and_reflows(tmp_read_config_path):
+    """A long note wraps inside the preview (no sideways scroll), and re-wraps on resize."""
+    config.save_read_config({"default": "a", "aliases": {"a": "doc_r1"}})
+    doc = "24/10/2026\n[10.00]\n" + " ".join(f"word{i}" for i in range(200)) + "\n"
+    with patch('mydocbot_app.google_docs.get_service', return_value=BlockingService(doc_text=doc)):
+        app = ReadOnlyApp()
+    async with app.run_test(size=(80, 30)) as pilot:
+        await settle(app, pilot)
+        preview = app.query_one("#preview-pane")
+        assert preview.max_scroll_x == 0
+        narrow_height = preview.virtual_size.height
+        await pilot.resize_terminal(160, 30)
+        await pilot.pause()
+        assert preview.max_scroll_x == 0
+        assert preview.virtual_size.height < narrow_height
 
 
 # ---------------------------------------------------------------------------
