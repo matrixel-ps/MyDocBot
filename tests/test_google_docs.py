@@ -225,5 +225,5 @@ class TestFieldMasks:
         assert google_docs.fetch_doc_title(MagicMock(side_effect=AssertionError), "d3") == "New name"
 
     def test_masks_cover_what_the_parsers_read(self):
-        """_doc_text() reads body.content[].paragraph.elements[].textRun.content."""
+        """doc_text() reads body.content[].paragraph.elements[].textRun.content."""
         assert google_docs.CONTENT_FIELDS == "title,body/content/paragraph/elements/textRun/content"

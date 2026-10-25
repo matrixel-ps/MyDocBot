@@ -810,7 +810,7 @@ def _doc(*paragraphs, extra=()):
 
 class TestDocTextExtraction:
     """A4 characterization: both parsers read the body the same way. Written
-    before extracting _doc_text(), and must pass unchanged after."""
+    before extracting doc_text(), and must pass unchanged after."""
 
     def test_write_parser_joins_runs_and_paragraphs(self):
         doc = _doc(["[06/18/26] (10:00)| first ", "run #a\n"], ["\n"], ["[06/17/26] (09:00)| older\n"])

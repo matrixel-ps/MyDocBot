@@ -60,7 +60,8 @@ files by hand.
 | `tags_index.json` | Each note you write | Local `#tag` index |
 | `pending_queue.json` | A write that couldn't be sent | Notes waiting to be written |
 | `discord_token` | You (Discord Developer Portal) | Bot token, only for the [Discord bot](#discord-bot) |
-| `discord_config.json` | You | Discord user IDs the bot obeys |
+| `discord_config.json` | You | Discord user IDs the bot obeys; optional docs to watch |
+| `watch_state.json` | The bot's watcher | Last seen state of each watched doc (hashes only, no note text) |
 
 ### 3. Add a document
 
@@ -120,8 +121,10 @@ met with Sam #standup          → default doc
 The bot replies with one line: `Prepended to log on [10/25/26] (14:31)|`, why
 the note was queued, or why it was rejected. It only obeys DMs from the user
 IDs in `discord_config.json`. Server channels and everyone else get no reply;
-a DM from someone else is logged with their ID. It only writes; there's no
-reading or `/` commands. Aliases added with `--add` or `/add` work right away.
+a DM from someone else is logged with their ID. Notes are the only thing you
+can send it; there are no `/` commands. Aliases added with `--add` or `/add`
+work right away. It can also [watch read-only docs](#watching-read-only-docs)
+and DM you when they change.
 
 **Create the bot (once):**
 1. At [discord.com/developers/applications](https://discord.com/developers/applications),
@@ -179,6 +182,40 @@ loginctl enable-linger "$USER"              # optional: keep it running when log
 
 It runs alongside the CLI and TUIs safely: updates to the queue and tag index
 are locked across processes.
+
+#### Watching read-only docs
+
+The bot can check some of your read-only docs (the aliases you added in
+`mydocbot --read`) every few minutes and DM you when an entry is added,
+edited or removed:
+
+```
+📄 standup ("Team Standup Log"): 1 new, 1 edited
+🆕 10/25/2026 [09.15] — Deployed the new build to staging
+✏️ edited 10/24/2026 [14.30] — Rollback done, all green
+```
+
+Add a `watch` block to `discord_config.json` and restart the bot:
+
+```json
+{"allowed_user_ids": ["YOUR_USER_ID"],
+ "watch": {"aliases": ["standup"], "interval_minutes": 5}}
+```
+
+- `aliases` are read-only aliases from `read_config.json`. A name that isn't
+  there stops the bot at startup with a message naming it. `/add` or a
+  changed doc ID in `--read` applies without a restart.
+- `interval_minutes` is optional: 5 by default, at least 1.
+- **First check:** a newly watched doc is only recorded, so you don't get its
+  whole history. After that, each check that finds changes sends one message
+  (up to 5 entries listed, then "…and N more").
+- **Quiet changes:** edits that don't touch an entry (a header, formatting,
+  re-wrapped lines) send nothing.
+- **Errors:** if a doc can't be read, it's retried on the next check, with no
+  false alerts. After 3 failed checks in a row you get one warning, and one
+  more when it's readable again.
+- **Read-only:** the watcher only reads the docs. It keeps a fingerprint of
+  each entry in `watch_state.json`, not the text.
 
 ### CLI
 

@@ -29,6 +29,7 @@ def _isolate_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr('core.google_docs.CREDENTIALS_PATH', str(data_dir / 'credentials.json'))
     monkeypatch.setattr('core.discord_handler.DISCORD_CONFIG_PATH', str(data_dir / 'discord_config.json'))
     monkeypatch.setattr('core.discord_handler.DISCORD_TOKEN_PATH', str(data_dir / 'discord_token'))
+    monkeypatch.setattr('core.doc_watch.WATCH_STATE_PATH', str(data_dir / 'watch_state.json'))
     return data_dir
 
 

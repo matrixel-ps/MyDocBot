@@ -47,11 +47,9 @@ def load_token(env=None):
     return token, warning
 
 
-def load_allowed_users():
-    """The Discord user IDs the bot acts on, from discord_config.json
-    ({"allowed_user_ids": ["123…"]}). IDs may be strings or numbers. An empty
-    or missing list is an error: the bot would otherwise ignore everyone, and a
-    typo in the key must not look like a working setup."""
+def load_discord_config():
+    """discord_config.json as a dict: the allowlist, plus the optional "watch"
+    block read by core.doc_watch (F11)."""
     try:
         with open(DISCORD_CONFIG_PATH) as f:
             data = json.load(f)
@@ -61,7 +59,16 @@ def load_allowed_users():
             '{"allowed_user_ids": ["<your user id>"]}') from None
     except (json.JSONDecodeError, UnicodeDecodeError) as e:
         raise DiscordSetupError(f"{DISCORD_CONFIG_PATH} is not valid JSON: {e}") from None
-    ids = data.get("allowed_user_ids") if isinstance(data, dict) else None
+    return data if isinstance(data, dict) else {}
+
+
+def load_allowed_users(data=None):
+    """The Discord user IDs the bot acts on, from discord_config.json
+    ({"allowed_user_ids": ["123…"]}). IDs may be strings or numbers. An empty
+    or missing list is an error: the bot would otherwise ignore everyone, and a
+    typo in the key must not look like a working setup."""
+    data = load_discord_config() if data is None else data
+    ids = data.get("allowed_user_ids")
     if not isinstance(ids, list) or not ids:
         raise DiscordSetupError(f'{DISCORD_CONFIG_PATH} needs a non-empty "allowed_user_ids" list.')
     try:

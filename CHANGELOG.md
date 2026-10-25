@@ -15,6 +15,13 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   (`uv tool install -e . --with discord.py`, or `pipx install -e '.[discord]'`),
   add a bot token and your user ID, and run `mydocbot-discord`. The README
   covers creating the bot and keeping it running with systemd.
+- **Change alerts for read-only docs:** the Discord bot can watch chosen
+  read-only docs and DM you when an entry is added, edited or removed.
+  List the aliases and an interval (5 minutes by default) in the `watch`
+  block of `discord_config.json`. The first check of a doc only records it,
+  formatting-only edits are ignored, and a doc that can't be read sends one
+  warning after 3 failed checks, not an alert every time. It only reads the
+  docs and stores fingerprints, not note text.
 - **Coverage report:** `bash coverage.sh` shows which lines the tests
   don't reach (`--html` for a browsable report). It's informational and
   not part of `lint.sh` or CI. Install `requirements-dev.txt` for it.

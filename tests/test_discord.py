@@ -270,3 +270,13 @@ class TestMain:
             assert discord_bot.main() == 1
         get_service.assert_not_called()
         assert "pip install -e '.[discord]'" in capsys.readouterr().err
+
+    def test_watch_alias_typo_exits_1_at_startup(self, data_dir, tmp_read_config_path, monkeypatch, capsys):
+        monkeypatch.setenv(dh.TOKEN_ENV, "t")
+        cfg.save_read_config({"default": "standup", "aliases": {"standup": "doc_s"}})
+        (data_dir / "discord_config.json").write_text(
+            json.dumps({"allowed_user_ids": [OWNER], "watch": {"aliases": ["standpu"]}}))
+        with patch('discord_bot.google_docs.get_service') as get_service:
+            assert discord_bot.main() == 1
+        get_service.assert_not_called()
+        assert "not in read_config.json: standpu" in capsys.readouterr().err
