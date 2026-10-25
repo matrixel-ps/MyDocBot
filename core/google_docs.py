@@ -1,5 +1,7 @@
+import errno
 import os
 import re
+import socket
 import sys
 import time
 from dataclasses import dataclass
@@ -10,7 +12,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
-from httplib2 import HttpLib2Error
+from httplib2 import HttpLib2Error, ServerNotFoundError
 
 from .paths import data_path
 
@@ -98,7 +100,24 @@ def get_service():
     return build('docs', 'v1', credentials=creds)
 
 
+# "The network is down" errors: no DNS (httplib2 turns socket.gaierror into
+# ServerNotFoundError) or no route. They are deliberately *not* retried (B9):
+# waiting 1 s + 2 s almost never brings the network back, and failing fast
+# keeps an offline write (and one-shot capture) instant; the note is queued.
+_OFFLINE_ERRNOS = {errno.ENETUNREACH, errno.EHOSTUNREACH, errno.EADDRNOTAVAIL}
+
+
+def is_offline_error(e):
+    """True for errors that mean the network itself is unavailable."""
+    if isinstance(e, (ServerNotFoundError, socket.gaierror)):
+        return True
+    return isinstance(e, OSError) and e.errno in _OFFLINE_ERRNOS
+
+
 def _api_call_with_retry(fn, max_retries=3):
+    """Call fn(), retrying HTTP 429/5xx, ConnectionError and TimeoutError up to
+    max_retries attempts with 1 s, 2 s, ... between them (3 attempts = 3 s of
+    waiting). Offline errors (see is_offline_error) and other errors raise at once."""
     for attempt in range(max_retries):
         try:
             return fn()
@@ -162,7 +181,7 @@ def classify_write_error(e):
         return WriteFailure("transient", f"{_TRANSIENT_MESSAGE} ({status})")
     if isinstance(e, RefreshError):
         return WriteFailure("auth", _AUTH_MESSAGE)
-    if isinstance(e, (ConnectionError, TimeoutError, TransportError, HttpLib2Error)):
+    if isinstance(e, (ConnectionError, TimeoutError, TransportError, HttpLib2Error)) or is_offline_error(e):
         return WriteFailure("transient", _TRANSIENT_MESSAGE)
     return WriteFailure("transient", f"{_TRANSIENT_MESSAGE} ({type(e).__name__}: {e})")
 

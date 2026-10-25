@@ -25,10 +25,9 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 ## Suggested order
 
-1. **B9:** retry DNS failures like other network errors (the TUI no longer
-   freezes during retries since A3).
-2. **B8:** make `/search` mean the same thing in the CLI and TUI.
-3. **P2:** split runtime vs. dev dependencies and pin the lint tools.
+1. **B8:** make `/search` mean the same thing in the CLI and TUI.
+2. **P2:** split runtime vs. dev dependencies and pin the lint tools.
+3. **B10:** route TUI note fetches through the retry helper (XS).
 
 ## Bugs
 
@@ -37,7 +36,7 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 | B6 | **No regression test for read-only "Today" label** | open | low | XS | tests/test_tui.py | Flagged in design decision #27: add a targeted test for `_date_key()` / `_format_date_header()`. |
 | B7 | **User input not escaped in TUI status messages** | open | low | XS | mydocbot_app.py `update_status()` callers, e.g. :370, :763, :822 | Aliases, tags, and validation messages are interpolated into Rich markup unescaped (`show_error()` already escapes). Input containing `[...]` can be swallowed or mis-styled. Carried over from CHANGELOG "Not Yet Done". |
 | B8 | **`/search` means different things in CLI and TUI** | open | med | S | core/commands.py `cmd_search()`, mydocbot_app.py `BaseNotesApp.cmd_search()` | The CLI fetches fresh from the API; both TUIs search only the session cache. Unify, or at least say so in `/help`. |
-| B9 | **DNS failures skip the retry backoff** | open | med | XS | core/google_docs.py `_api_call_with_retry()` | `httplib2.ServerNotFoundError` (no DNS, a common "offline" case) subclasses `HttpLib2Error`, not `ConnectionError`, so it isn't retried; the write fails at once. F6 classifies it as transient for messages, but retry should treat it like other network errors. Each retry cycle takes ~7 s; since A3 the TUI stays usable meanwhile, but the CLI and one-shot mode still wait. |
+| B10 | **TUI note fetches have no retry** | open | low | XS | mydocbot_app.py `_fetch_recent()` (both apps) | They call `documents().get().execute()` directly, so a 429/5xx at startup, `/switch`, `/refresh`, or `/more` fails at once, while title fetches and writes retry. Use `google_docs.fetch_doc()` (which retries). |
 
 ## Privacy & repo hygiene
 

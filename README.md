@@ -59,7 +59,7 @@ timestamp format (see `parse_entries_readable()` below).
 - **TUI:** [Textual](https://textual.textualize.io/) 0.41+ — async widget framework (two apps: read/write and read-only)
 - **Storage:** Google Docs API (`google-api-python-client`, `google-auth-oauthlib`, OAuth 2.0)
 - **Config:** Local JSON files — `docs_config.json` (write-mode aliases), `read_config.json` (read-only aliases), and `tags_index.json` (tag index)
-- **Testing:** pytest 7.4+ with monkeypatched Google API — **305 tests, 0 network needed** (includes a headless Textual `run_test()` suite for both TUI apps)
+- **Testing:** pytest 7.4+ with monkeypatched Google API — **317 tests, 0 network needed** (includes a headless Textual `run_test()` suite for both TUI apps)
 - **Lint/Types:** ruff (0 errors) + mypy — both are real CI gates via `lint.sh` (mypy covers `mydocbot_app.py` too, not just `core/`)
 - **CI:** GitHub Actions (`.github/workflows/ci.yml`) runs `lint.sh` on every push/PR to `main`/`dev`
 
@@ -134,7 +134,7 @@ timestamp format (see `parse_entries_readable()` below).
 
 - **`#tag` auto-detection:** `re.findall(r'#(\w+)', text.lower())` — word characters only. Use `#project_alpha` for compound tags.
 - **Tag persistence:** After every submission, `index_note()` appends to `tags_index.json`. Duplicates (same ts + doc_id + preview) are suppressed.
-- **API retry:** `prepend_text()` (and other API calls via `_api_call_with_retry()`) retry up to 3 times on HTTP 429/5xx and connection errors, with 1 s / 2 s / 4 s exponential backoff. Non-transient errors (403, 404) are not retried.
+- **API retry:** writes and title/doc fetches via `_api_call_with_retry()` make up to 3 attempts on HTTP 429/5xx, `ConnectionError`, and `TimeoutError`, waiting 1 s then 2 s (about 3 s in all). Non-transient errors (403, 404) are not retried, and neither are "network is down" errors (no DNS, no route): those queue the note at once, so writing offline stays instant.
 - **OAuth flow:** Picks up existing `token.json` or launches browser consent via `google-auth-oauthlib`. If `credentials.json` is missing, `get_service()` exits with a friendly setup message instead of a raw traceback. If the saved token can't be refreshed (revoked or expired) or is unreadable, it is deleted and the browser sign-in runs again; if Google can't be reached at startup, it exits with a connection message and keeps `token.json`.
 - **Config resilience:** Corrupt `docs_config.json`, `read_config.json`, `tags_index.json`, and `pending_queue.json` all fall back gracefully with a stderr warning instead of crashing.
 - **Doc title caching:** `fetch_doc_title()` caches successful lookups in-process (keyed by `doc_id`), so `/list`, `/switch`, and startup don't repeatedly re-fetch the same title. `/refresh` invalidates the cache for the current doc so external renames are picked up.
@@ -422,7 +422,7 @@ Note body here — multiple lines preserved.
 ## Testing
 
 ```bash
-python -m pytest tests/ -v                        # All 305 tests
+python -m pytest tests/ -v                        # All 317 tests
 python -m pytest tests/test_parser.py -v          # Parser + queue + date-filter tests
 python -m pytest tests/test_tui.py -v             # Headless Textual TUI tests
 python -m pytest tests/ -k "corrupt"              # Corrupt-JSON resilience tests
@@ -444,7 +444,7 @@ bash lint.sh                                      # ruff + mypy + pytest — all
 | `test_validation.py` | `validate_doc_id`, `validate_alias`, `validate_config`, `validate_note`, `validate_history_size` |
 | `test_tui.py` | `MyDocBotApp`/`ReadOnlyApp` mounted headlessly via Textual's `run_test()`; covers `/config` (incl. the fixed dead-code bug), `/add` alias validation, read-only mount/list/current |
 
-All tests use monkeypatched Google API and temp files — no network, no OAuth. Current total: **305 passed**.
+All tests use monkeypatched Google API and temp files — no network, no OAuth. Current total: **317 passed**.
 `test_tui.py` requires `pytest-asyncio` (configured with `asyncio_mode = "auto"` in `pyproject.toml`).
 
 ---
@@ -460,7 +460,7 @@ All tests use monkeypatched Google API and temp files — no network, no OAuth. 
 - **Notes cache:** 500-entry cap, newest-first. Loaded from the API on startup (`history_size` most recent, default 20) and on each `/switch`; `/refresh` re-fetches, `/more` loads older entries.
 - **Offline queue:** `pending_queue.json` is deleted when empty. The queue is flushed (all docs, oldest first) *before* each new note, because every write is a prepend at the top of the doc. Flushing stops per doc at the first failure, to keep order and to avoid one retry wait per queued note. Use `/flush` to retry manually.
 - **Write failures are classified:** HTTP 400/403/404 are *permanent* (the automatic flush skips that doc until `/flush`, since retrying can't help until you fix something); 401 and an expired/revoked sign-in are *auth* (restart to sign in again; retried automatically); everything else, including unknown errors, is *transient*. The reason is stored with each queued note (`"error"` in `pending_queue.json`). A note moved with `/queue move` keeps its original timestamp, so it can land above newer notes in the target doc.
-- **API retry:** Transient errors (429, 500/502/503/504, `ConnectionError`, `TimeoutError`) are retried up to 3 times with 1 s / 2 s / 4 s backoff. Non-transient errors (403, 404) are not retried.
+- **API retry:** Transient errors (429, 500/502/503/504, `ConnectionError`, `TimeoutError`) get up to 3 attempts with 1 s / 2 s between them (~3 s). Non-transient errors (403, 404) are not retried. "Network is down" errors (`httplib2.ServerNotFoundError` for no DNS; `ENETUNREACH` / `EHOSTUNREACH` / `EADDRNOTAVAIL`) deliberately fail fast and the note is queued at once — a few seconds of backoff almost never brings the network back. The TUI's note fetches (`/refresh`, startup) don't go through the retry at all yet (backlog B10).
 - **`resolve_editor()` shared:** Both CLI and TUI call the same `resolve_editor()` from `core/commands.py`. Editor fallback order: `$EDITOR` → `vim` → `nano` → `vi`.
 - **Independent read/write configs:** `docs_config.json` and `read_config.json` are separate registries so the same alias name can point to different docs (or exist in only one mode) without conflict.
 - **Read-only mode has no write path:** `ReadOnlyApp` never calls `prepend_text()` — it only fetches and displays, using its own timestamp format parser (`parse_entries_readable()`).

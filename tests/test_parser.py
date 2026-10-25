@@ -252,6 +252,22 @@ class TestPrependText:
             result = prepend_text(service, "doc_1", "test note")
         assert result is True
 
+    @pytest.mark.parametrize("error", [
+        __import__('httplib2').ServerNotFoundError("Unable to find the server"),
+        OSError(101, "Network is unreachable"),
+        OSError(113, "No route to host"),
+    ])
+    def test_clearly_offline_errors_fail_fast(self, error):
+        """B9 (decided: fail fast): no DNS / no route means the network is down, so the
+        note is queued at once instead of after the backoff."""
+        service = MagicMock()
+        service.documents().batchUpdate().execute.side_effect = error
+        with patch('core.google_docs.time.sleep') as mock_sleep:
+            result = prepend_text(service, "doc_1", "test note")
+        assert result is False
+        assert mock_sleep.call_count == 0
+        assert service.documents().batchUpdate().execute.call_count == 1
+
     def test_exponential_backoff_delays(self):
         service = MagicMock()
         service.documents().batchUpdate().execute.side_effect = (
@@ -259,8 +275,8 @@ class TestPrependText:
         )
         with patch('core.google_docs.time.sleep') as mock_sleep:
             prepend_text(service, "doc_1", "test note")
-        assert mock_sleep.call_args_list[0][0][0] == 1
-        assert mock_sleep.call_args_list[1][0][0] == 2
+        # 3 attempts, 2 sleeps: 1 s + 2 s (README used to say 1/2/4 s, ~7 s).
+        assert [c.args[0] for c in mock_sleep.call_args_list] == [1, 2]
 
 
 class TestSearchCache:
