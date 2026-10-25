@@ -19,3 +19,7 @@ pending_queue.json
 *.egg-info/
 build/
 dist/
+
+# Coverage output from coverage.sh
+.coverage
+htmlcov/

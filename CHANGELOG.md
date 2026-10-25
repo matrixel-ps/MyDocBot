@@ -7,6 +7,9 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
 ## [Unreleased]
 
 ### Added
+- **Coverage report:** `bash coverage.sh` shows which lines the tests
+  don't reach (`--html` for a browsable report). It's informational and
+  not part of `lint.sh` or CI. Install `requirements-dev.txt` for it.
 - **`/queue`:** lists queued notes (oldest first) with the reason each one
   failed. `/queue drop <n>` discards one (the CLI asks first; both show its
   text), and `/queue move <n> <alias>` sends one to another alias, e.g.

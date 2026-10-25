@@ -1,8 +1,9 @@
-# Everything needed to run lint.sh (ruff -> mypy -> pytest), pinned so CI and
-# local runs use the same tool versions. Install with:
+# Everything needed to run lint.sh (ruff -> mypy -> pytest) and coverage.sh,
+# pinned so CI and local runs use the same tool versions. Install with:
 #   pip install -r requirements-dev.txt
 -r requirements.txt
 pytest==9.1.1
 pytest-asyncio==1.4.0
+pytest-cov==7.1.0
 ruff==0.15.18
 mypy==2.1.0
