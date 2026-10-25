@@ -25,15 +25,14 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 ## Suggested order
 
-1. **B6:** regression test for the read-only "Today" label (XS).
-2. **A1:** timestamp parsing helper (XS).
-3. **A4:** merge duplicated text-extraction code (XS).
+1. **A1:** timestamp parsing helper (XS).
+2. **A4:** merge duplicated text-extraction code (XS).
+3. **D3:** add a coverage report (XS).
 
 ## Bugs
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
-| B6 | **No regression test for read-only "Today" label** | open | low | XS | tests/test_tui.py | Flagged in design decision #27: add a targeted test for `_date_key()` / `_format_date_header()`. |
 
 ## Privacy & repo hygiene
 
