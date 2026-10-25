@@ -97,6 +97,12 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   changes; `tests/test_tui.py` passes unmodified.
 
 ### Fixed
+- **A corrupt data file is no longer lost:** if a config, the tag index,
+  or the offline queue can't be read as JSON (for example after a typo
+  while editing it), it's moved to a timestamped `.corrupt-…` backup next
+  to it before MyDocBot starts fresh, and the warning says where. Before,
+  the config was overwritten at once and queued notes were silently
+  discarded.
 - **Data could be wiped when two MyDocBot windows were open:** saving a
   file emptied it for a moment, and a window reading it right then treated
   it as empty, then saved over it. That could erase queued notes, the tag

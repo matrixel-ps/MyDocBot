@@ -25,15 +25,14 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 ## Suggested order
 
-1. **B11:** back up a corrupt data file before resetting it (XS).
-2. **A5:** true pagination for `/more`.
-3. **D1:** shorten the README.
+1. **A5:** true pagination for `/more`.
+2. **D1:** shorten the README.
+3. **F3:** `/undo` last note.
 
 ## Bugs
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
-| B11 | **A corrupt config is overwritten without a backup** | open | med | XS | core/config.py `load_config()` / `load_read_config()` | On a JSON or schema error the loader prints "Starting fresh" and immediately saves an empty config over the file, so a hand-editing typo loses every alias. Copy the bad file to `docs_config.json.corrupt` first. (The tag index and queue only *read* as empty; they're overwritten on the next save, so the same applies to them.) |
 
 ## Privacy & repo hygiene
 

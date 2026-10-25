@@ -33,8 +33,13 @@ def load_tags_index():
             if not content:
                 return {}
             return json.loads(content)
-    except (json.JSONDecodeError, OSError) as e:
-        print(f"Warning: Corrupt tags index at {TAGS_INDEX_PATH} — {e}. Starting fresh.", file=sys.stderr)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        backup = storage.quarantine(TAGS_INDEX_PATH)
+        print(f"Warning: Corrupt tags index at {TAGS_INDEX_PATH} — {e}. Moved it to {backup}; "
+              "starting with an empty index (/tag reindex rebuilds a doc's tags).", file=sys.stderr)
+        return {}
+    except OSError as e:  # unreadable, not corrupt: leave the file where it is
+        print(f"Warning: Can't read tags index at {TAGS_INDEX_PATH} — {e}.", file=sys.stderr)
         return {}
 
 
@@ -146,8 +151,13 @@ def load_pending_notes():
             if not content:
                 return []
             return json.loads(content)
-    except (json.JSONDecodeError, OSError) as e:
-        print(f"Warning: Corrupt pending queue at {PENDING_PATH} — {e}. Discarding.", file=sys.stderr)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        backup = storage.quarantine(PENDING_PATH)
+        print(f"Warning: Corrupt pending queue at {PENDING_PATH} — {e}. Moved it to {backup}; "
+              "the notes in it were not sent.", file=sys.stderr)
+        return []
+    except OSError as e:  # unreadable, not corrupt: leave the file where it is
+        print(f"Warning: Can't read pending queue at {PENDING_PATH} — {e}.", file=sys.stderr)
         return []
 
 

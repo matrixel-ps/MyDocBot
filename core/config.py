@@ -20,15 +20,24 @@ def load_config():
             cfg = json.load(f)
         valid, msg = validate_config(cfg)
         if not valid:
-            print(f"Warning: Invalid config schema — {msg}. Starting fresh.", file=sys.stderr)
+            backup = storage.quarantine(CONFIG_PATH)
+            print(f"Warning: Invalid config schema — {msg}. Moved it to {backup} and started fresh.", file=sys.stderr)
             cfg = {"default": "", "aliases": {}}
             save_config(cfg)
         return cfg
-    except (json.JSONDecodeError, OSError) as e:
-        print(f"Warning: Corrupt config at {CONFIG_PATH} — {e}. Starting fresh.", file=sys.stderr)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        backup = storage.quarantine(CONFIG_PATH)
+        print(f"Warning: Corrupt config at {CONFIG_PATH} — {e}. Moved it to {backup} and started fresh.",
+              file=sys.stderr)
         config = {"default": "", "aliases": {}}
         save_config(config)
         return config
+    except OSError as e:
+        # Unreadable, not corrupt: leave the file alone and don't save over it
+        # (an atomic save would succeed even where reading failed).
+        print(f"Warning: Can't read {CONFIG_PATH} — {e}. Using an empty config for now; "
+              "the file was left as it is.", file=sys.stderr)
+        return {"default": "", "aliases": {}}
 
 
 def save_config(config):
@@ -60,15 +69,24 @@ def load_read_config():
             cfg = json.load(f)
         valid, msg = validate_config(cfg)
         if not valid:
-            print(f"Warning: Invalid read config schema — {msg}. Starting fresh.", file=sys.stderr)
+            backup = storage.quarantine(READ_CONFIG_PATH)
+            print(f"Warning: Invalid read config schema — {msg}. Moved it to {backup} and started fresh.", file=sys.stderr)
             cfg = {"default": "", "aliases": {}}
             save_read_config(cfg)
         return cfg
-    except (json.JSONDecodeError, OSError) as e:
-        print(f"Warning: Corrupt read config at {READ_CONFIG_PATH} — {e}. Starting fresh.", file=sys.stderr)
+    except (json.JSONDecodeError, UnicodeDecodeError) as e:
+        backup = storage.quarantine(READ_CONFIG_PATH)
+        print(f"Warning: Corrupt read config at {READ_CONFIG_PATH} — {e}. Moved it to {backup} and started fresh.",
+              file=sys.stderr)
         cfg = {"default": "", "aliases": {}}
         save_read_config(cfg)
         return cfg
+    except OSError as e:
+        # Unreadable, not corrupt: leave the file alone and don't save over it
+        # (an atomic save would succeed even where reading failed).
+        print(f"Warning: Can't read {READ_CONFIG_PATH} — {e}. Using an empty config for now; "
+              "the file was left as it is.", file=sys.stderr)
+        return {"default": "", "aliases": {}}
 
 
 def save_read_config(config):

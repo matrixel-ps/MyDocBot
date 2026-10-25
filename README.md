@@ -82,7 +82,7 @@ timestamp format (see `parse_entries_readable()` below).
 - **Offline queue:** Failed submissions are saved to `pending_queue.json`. Before each new note is written, queued notes for all docs are retried, oldest first, so the doc stays in order; if a doc's queued notes still fail, new notes for it are queued behind them. Tags in queued notes are indexed once they're written. Use `/flush` to retry manually. Pending count is shown in the prompt.
 - **Why a note was queued:** the message says what went wrong — offline, a sign-in that needs a restart, or a problem that won't fix itself (document not found, no edit permission). Notes that failed for one of those last reasons are kept but not retried automatically before every note; `/queue` lists every queued note with its last error, `/queue drop <n>` discards one (after asking), `/queue move <n> <alias>` sends one to another alias (e.g. after fixing a wrong doc ID), and `/flush` retries everything.
 - **Input validation:** Empty notes, oversized notes (>50 KB), and malformed doc IDs are rejected before any API call.
-- **Error resilience:** Network failures are caught — session continues, note is queued. Corrupt `docs_config.json` falls back to a fresh empty config with a stderr warning.
+- **Error resilience:** Network failures are caught — session continues, note is queued. A corrupt `docs_config.json` is moved aside to a timestamped `.corrupt-…` backup and replaced with a fresh empty config, with a stderr warning naming the backup.
 
 ### Read/Write TUI Mode (`python main.py --tui`)
 
@@ -137,7 +137,7 @@ timestamp format (see `parse_entries_readable()` below).
 - **Tag persistence:** After every submission, `index_note()` appends to `tags_index.json`. Duplicates (same ts + doc_id + preview) are suppressed.
 - **API retry:** writes and title/doc fetches via `_api_call_with_retry()` make up to 3 attempts on HTTP 429/5xx, `ConnectionError`, and `TimeoutError`, waiting 1 s then 2 s (about 3 s in all). Non-transient errors (403, 404) are not retried, and neither are "network is down" errors (no DNS, no route): those queue the note at once, so writing offline stays instant.
 - **OAuth flow:** Picks up existing `token.json` or launches browser consent via `google-auth-oauthlib`. If `credentials.json` is missing, `get_service()` exits with a friendly setup message instead of a raw traceback. If the saved token can't be refreshed (revoked or expired) or is unreadable, it is deleted and the browser sign-in runs again; if Google can't be reached at startup, it exits with a connection message and keeps `token.json`.
-- **Config resilience:** Corrupt `docs_config.json`, `read_config.json`, `tags_index.json`, and `pending_queue.json` all fall back gracefully with a stderr warning instead of crashing.
+- **Corrupt-file recovery:** if `docs_config.json`, `read_config.json`, `tags_index.json`, or `pending_queue.json` can't be parsed, it's moved to `<name>.corrupt-YYYYMMDD-HHMMSS` in the data directory (never overwritten by a later one) and MyDocBot starts that file fresh, with a warning naming the backup. Fix the backup and rename it back to recover (for a lost tag index, `/tag reindex` also works). A file that merely can't be *read* (e.g. permissions) is left untouched.
 - **Doc title caching:** `fetch_doc_title()` caches successful lookups in-process (keyed by `doc_id`), so `/list`, `/switch`, and startup don't repeatedly re-fetch the same title. `/refresh` invalidates the cache for the current doc so external renames are picked up.
 - **Safe writes:** every data file (`docs_config.json`, `read_config.json`, `tags_index.json`, `pending_queue.json`, `token.json`) is written atomically (temp file, then rename) with owner-only (`0600`) permissions, so another MyDocBot window reading at the same moment never sees a half-written or empty file. Two windows *changing* the same file at the same instant can still lose one change (no locking yet; backlog A6).
 
@@ -405,6 +405,7 @@ Note body here — multiple lines preserved.
 │   ├── test_main.py          main() REPL loop, --add flag, pending count display, one-shot capture
 │   ├── test_paths.py         Data-dir resolution and one-time migration
 │   ├── test_storage.py       Atomic writes: no truncated reads, 0600, cleanup on failure
+│   ├── test_corrupt_backup.py  Corrupt data files moved to timestamped backups, not overwritten
 │   ├── test_notes.py         submit_note(): sent/queued/rejected, offline-queue order
 │   ├── test_timestamps.py    Timestamp format/parse round trip, date flags, header pattern
 │   ├── test_google_docs.py   get_service() sign-in: refresh, revoked/corrupt token, offline
