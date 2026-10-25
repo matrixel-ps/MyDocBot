@@ -2,11 +2,11 @@ import json
 import os
 import sys
 
+from core.paths import data_path
 from core.validation import DEFAULT_HISTORY_SIZE, validate_config
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CONFIG_PATH = os.path.join(BASE_DIR, 'docs_config.json')
-READ_CONFIG_PATH = os.path.join(BASE_DIR, 'read_config.json')
+CONFIG_PATH = data_path('docs_config.json')
+READ_CONFIG_PATH = data_path('read_config.json')
 
 
 def load_config():

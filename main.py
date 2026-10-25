@@ -1,13 +1,52 @@
 import argparse
+import sys
 
-from core import config, google_docs, notes, parser, validation
+from core import config, google_docs, notes, parser, paths, validation
 from core.commands import dispatch, queued_message
+
+# One-shot exit codes. 2 is left to argparse for usage errors; 3 lets a script
+# or hotkey tell "queued offline" apart from "sent".
+EXIT_SENT = 0
+EXIT_ERROR = 1
+EXIT_QUEUED = 3
+
+
+def _stdin_note():
+    """Note text piped on stdin, or None when stdin is a terminal."""
+    if sys.stdin is None or sys.stdin.isatty():
+        return None
+    return sys.stdin.read()
+
+
+def one_shot(svc_config, alias, text):
+    """Write a single note to `alias` (or the default doc) and return an exit code."""
+    aliases = svc_config.get("aliases", {})
+    alias = alias or svc_config.get("default", "")
+    if not aliases:
+        print("No documents configured. Add one with --add <alias> <doc_id>.", file=sys.stderr)
+        return EXIT_ERROR
+    if alias not in aliases:
+        print(f"Alias '{alias}' not found. Available: {', '.join(aliases)}", file=sys.stderr)
+        return EXIT_ERROR
+    service = google_docs.get_service()
+    result = notes.submit_note(service, aliases[alias], text)
+    if result.status == "rejected":
+        print(f"Note rejected: {result.reason}", file=sys.stderr)
+        return EXIT_ERROR
+    if result.status == "queued":
+        print(queued_message(result), file=sys.stderr)
+        return EXIT_QUEUED
+    msg = f"--- Prepended to {alias} on {result.timestamp} ---"
+    if result.flushed:
+        msg += f" (flushed {len(result.flushed)} pending)"
+    print(msg)
+    return EXIT_SENT
 
 
 def main():
     arg_parser = argparse.ArgumentParser(description="MyDocBot - terminal note-taker for Google Docs")
     arg_parser.add_argument('--doc', '-d', type=str, default=None,
-                            help='Start with the given document alias')
+                            help='Document alias to start on (or to write a one-shot note to)')
     arg_parser.add_argument('--list', '-l', action='store_true',
                             help='List configured aliases and exit')
     arg_parser.add_argument('--add', nargs=2, metavar=('ALIAS', 'DOC_ID'),
@@ -16,7 +55,21 @@ def main():
                             help='Launch the rich TUI interface')
     arg_parser.add_argument('--read', '-r', nargs='?', const='', default=None,
                             help='Launch read-only TUI (optional: start alias)')
+    arg_parser.add_argument('note', nargs='*',
+                            help='Write this note and exit, without the REPL. '
+                                 'A note piped on stdin works the same way.')
     args = arg_parser.parse_args()
+    modes = args.read is not None or args.tui or args.list or args.add
+
+    if args.note and modes:
+        arg_parser.error("a note can't be combined with --tui, --read, --list, or --add")
+
+    paths.prepare_data_dir()
+
+    if not modes:
+        text = " ".join(args.note) if args.note else _stdin_note()
+        if text is not None:
+            return one_shot(config.load_config(), args.doc, text.rstrip("\n"))
 
     if args.read is not None:
         from mydocbot_app import ReadOnlyApp
@@ -143,4 +196,4 @@ def main():
 
 
 if __name__ == '__main__':
-    main()
+    raise SystemExit(main())

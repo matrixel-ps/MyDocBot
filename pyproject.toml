@@ -1,3 +1,30 @@
+[build-system]
+requires = ["setuptools>=64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "mydocbot"
+version = "0.1.0"
+description = "Terminal note-taker that prepends timestamped notes to Google Docs"
+readme = "README.md"
+requires-python = ">=3.10"
+# Direct runtime dependencies only. requirements.txt keeps the full pinned set
+# (and the test tools, until P2 splits them out).
+dependencies = [
+    "google-api-python-client>=2.0",
+    "google-auth>=2.0",
+    "google-auth-oauthlib>=1.0",
+    "textual>=0.41.0",
+    "rich>=13.0.0",
+]
+
+[project.scripts]
+mydocbot = "main:main"
+
+[tool.setuptools]
+py-modules = ["main", "mydocbot_app"]
+packages = ["core"]
+
 [tool.ruff]
 line-length = 120
 target-version = "py310"

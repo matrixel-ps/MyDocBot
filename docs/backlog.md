@@ -25,8 +25,8 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 ## Suggested order
 
-1. **F1 + F2:** one-line capture and installing as a command.
-2. **F4:** `/tag reindex`.
+1. **F4:** `/tag reindex`.
+2. **B5:** note bodies containing a date get split.
 
 ## Bugs
 
@@ -48,8 +48,6 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
-| F1 | **Quick one-line capture** | open | high | S | main.py | `mydocbot "note #tag"` / `echo ... \| mydocbot -d work` writes the note and exits, with no REPL. The biggest daily-use win; works well with shell aliases and hotkeys. |
-| F2 | **Install as a command; config in `~/.config/mydocbot/`** | open | med | M | pyproject.toml, core/config.py, core/parser.py, core/google_docs.py | A `[project.scripts]` entry point and an XDG config dir instead of the repo root, so it runs from any directory. Needs a one-time migration of the existing files. The files are already gitignored (P1, 2026-10-24); moving them also keeps them out of the repo directory entirely. |
 | F3 | **`/undo` last note** | open | low | M | core/google_docs.py, commands, TUI | Remove the range MyDocBot just wrote at the top of the doc, but only if the top entry still matches what was written. |
 | F4 | **`/tag reindex`** | open | med | M | core/parser.py, commands | Rebuild `tags_index.json` from the doc via `parse_entries()`. Removes the "no historical backfill" limitation (design decision #6) and repairs damage from B2. |
 | F5 | **Hyphenated tags** | open | low | XS | core/parser.py `extract_tags()` | Allow `#project-alpha` with a regex like `#([\w-]+)` (strip a trailing `-`). Today it silently becomes `#project`. Update design decision #9 and the README. |

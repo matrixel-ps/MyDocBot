@@ -7,10 +7,25 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
 ## [Unreleased]
 
 ### Added
+- **Quick capture:** `mydocbot "note #tag"` writes one note to the default
+  doc and exits, with no REPL. `-d <alias>` picks another doc, and text piped
+  on stdin works too (`echo note | mydocbot -d work`). Same validation,
+  offline queueing, and tag indexing as the REPL. Exit codes: `0` sent, `1`
+  rejected or config error, `3` queued offline.
+- **Install as a command:** `pipx install -e .` (or `pip install -e .`)
+  provides a `mydocbot` command that runs from any directory.
+  `python main.py` still works.
 - **`docs_config.example.json`:** a template config with a placeholder doc ID.
   Copy it to `docs_config.json`, or keep using `python main.py --add`.
 
 ### Changed
+- **Your data now lives outside the repo,** in `~/.config/mydocbot/`
+  (or `$XDG_CONFIG_HOME/mydocbot`, or `$MYDOCBOT_HOME` if set):
+  `credentials.json`, `token.json`, and the four JSON data files. The first
+  run copies them from the repo root and says what it copied. The originals
+  are kept; delete them once everything works.
+- **Piped input is now a note:** `something | mydocbot` writes the piped
+  text as one note instead of feeding it to the REPL.
 - **Personal data is no longer tracked in git:** `docs_config.json`,
   `read_config.json`, `tags_index.json`, and `pending_queue.json` are now
   gitignored, and `docs_config.json` and `tags_index.json` were removed from

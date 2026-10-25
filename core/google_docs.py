@@ -10,11 +10,12 @@ from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
 
+from .paths import data_path
+
 SCOPES = ['https://www.googleapis.com/auth/documents']
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-CREDENTIALS_PATH = os.path.join(BASE_DIR, 'credentials.json')
-TOKEN_PATH = os.path.join(BASE_DIR, 'token.json')
+CREDENTIALS_PATH = data_path('credentials.json')
+TOKEN_PATH = data_path('token.json')
 
 # In-process cache of doc_id -> title, to avoid re-fetching the same doc's
 # title on every /list, /switch, or startup call within a single session.
@@ -78,7 +79,7 @@ def get_service():
                 raise SystemExit(
                     f"Error: '{CREDENTIALS_PATH}' not found.\n"
                     "Download OAuth 2.0 credentials (Desktop app) from the Google Cloud "
-                    "Console and save them as 'credentials.json' in the project root. "
+                    "Console and save them at that path. "
                     "See README.md 'Setup' section for details."
                 )
             flow = InstalledAppFlow.from_client_secrets_file(
