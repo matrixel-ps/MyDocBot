@@ -7,6 +7,21 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
 ## [Unreleased]
 
 ### Added
+- **Discord bot:** DM a private Discord bot and the message is written as a
+  note, with the same validation, offline queueing and tag indexing as quick
+  capture. `-d <alias>` picks another doc, and the bot replies with one line
+  (sent, queued and why, or rejected). It only answers DMs from the Discord
+  user IDs you list. Install the optional extra
+  (`uv tool install -e . --with discord.py`, or `pipx install -e '.[discord]'`),
+  add a bot token and your user ID, and run `mydocbot-discord`. The README
+  covers creating the bot and keeping it running with systemd.
+- **Change alerts for read-only docs:** the Discord bot can watch chosen
+  read-only docs and DM you when an entry is added, edited or removed.
+  List the aliases and an interval (5 minutes by default) in the `watch`
+  block of `discord_config.json`. The first check of a doc only records it,
+  formatting-only edits are ignored, and a doc that can't be read sends one
+  warning after 3 failed checks, not an alert every time. It only reads the
+  docs and stores fingerprints, not note text.
 - **Coverage report:** `bash coverage.sh` shows which lines the tests
   don't reach (`--html` for a browsable report). It's informational and
   not part of `lint.sh` or CI. Install `requirements-dev.txt` for it.
@@ -106,6 +121,11 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   changes; `tests/test_tui.py` passes unmodified.
 
 ### Fixed
+- **Notes lost when two windows wrote at once:** a note queued in one
+  window (or by the Discord bot) while another was sending queued notes
+  could be deleted, and two windows sending at the same moment could write a
+  note twice. Updates to the queue and tag index are now locked across
+  processes.
 - **A corrupt data file is no longer lost:** if a config, the tag index,
   or the offline queue can't be read as JSON (for example after a typo
   while editing it), it's moved to a timestamped `.corrupt-…` backup next

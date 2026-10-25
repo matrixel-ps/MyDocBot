@@ -6,8 +6,9 @@ import pytest
 
 
 def _remove_with_backups(path):
-    """Delete a temp data file and any <path>.corrupt-* backups made from it (B11)."""
-    for p in [path, *glob.glob(f"{path}.corrupt-*")]:
+    """Delete a temp data file, any <path>.corrupt-* backups made from it (B11),
+    and its lock files (<path>.lock, <path>.flush.lock; A6)."""
+    for p in [path, *glob.glob(f"{path}.corrupt-*"), *glob.glob(f"{path}*.lock")]:
         if os.path.exists(p):
             os.unlink(p)
 
@@ -26,6 +27,9 @@ def _isolate_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr('core.parser.PENDING_PATH', str(data_dir / 'pending_queue.json'))
     monkeypatch.setattr('core.google_docs.TOKEN_PATH', str(data_dir / 'token.json'))
     monkeypatch.setattr('core.google_docs.CREDENTIALS_PATH', str(data_dir / 'credentials.json'))
+    monkeypatch.setattr('core.discord_handler.DISCORD_CONFIG_PATH', str(data_dir / 'discord_config.json'))
+    monkeypatch.setattr('core.discord_handler.DISCORD_TOKEN_PATH', str(data_dir / 'discord_token'))
+    monkeypatch.setattr('core.doc_watch.WATCH_STATE_PATH', str(data_dir / 'watch_state.json'))
     return data_dir
 
 

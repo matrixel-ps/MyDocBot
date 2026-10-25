@@ -133,7 +133,7 @@ def _api_call_with_retry(fn, max_retries=3):
 # Partial-response masks (A5). The Docs API can't page a document's content
 # (documents.get has no range parameter), but `fields` drops everything the
 # parsers never read: styles, layout, lists, inline objects. CONTENT_FIELDS is
-# exactly what _doc_text() walks, plus the title so one call serves both.
+# exactly what doc_text() walks, plus the title so one call serves both.
 TITLE_FIELDS = "title"
 CONTENT_FIELDS = "title,body/content/paragraph/elements/textRun/content"
 
@@ -222,7 +222,7 @@ def prepend_text(service, doc_id, text):
     return try_prepend(service, doc_id, text) is None
 
 
-def _doc_text(doc):
+def doc_text(doc):
     """All paragraph text in a Docs body, joined; non-paragraph elements (tables,
     section breaks) and non-text runs are skipped. Shared by both parsers (A4)."""
     content = doc.get('body', {}).get('content', [])
@@ -239,7 +239,7 @@ def _doc_text(doc):
 
 
 def parse_entries_readable(doc, count=2):
-    text = _doc_text(doc).replace('\r\n', '\n').replace('\r', '\n')
+    text = doc_text(doc).replace('\r\n', '\n').replace('\r', '\n')
 
     parts = re.split(
         r'(?=^\d{1,2}/\d{1,2}/\d{4}\n\[\d{1,2}\.\d{1,2}\]$)',
@@ -272,7 +272,7 @@ def parse_entries_readable(doc, count=2):
 
 
 def parse_entries(doc, count=2):
-    text = _doc_text(doc)  # line endings left as-is, unlike the read-only parser
+    text = doc_text(doc)  # line endings left as-is, unlike the read-only parser
     # Only a full "[MM/DD/YY] (HH:MM)|" header at the start of a line begins a
     # new entry, so a date written inside a note body doesn't split it (B5).
     parts = re.split(f'^(?={HEADER_PATTERN})', text, flags=re.MULTILINE)

@@ -26,7 +26,7 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 ## Suggested order
 
 1. **F3:** `/undo` last note.
-2. **A6:** file locking for simultaneous read-modify-write.
+2. **A7:** config saves that don't overwrite another process's changes.
 3. **F9:** multi-doc tag aggregation.
 
 ## Bugs
@@ -53,7 +53,7 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
-| A6 | **File locking for concurrent CLI + TUI use** | open | low | M | core/storage.py, core/config.py, core/parser.py | Atomic writes are done (2026-10-24): a reader never sees an empty or partial file. What's left: two processes doing read-modify-write on the same file at the same instant (e.g. both `queue_note()`) can still lose one update. Fix with an advisory lock (`fcntl.flock` on a lock file in the data dir) around load-modify-save; POSIX-only. |
+| A7 | **Config saves overwrite changes made by another process** | open | low | S | core/commands.py, mydocbot_app.py `save_config` callers, main.py | The CLI and TUI load `docs_config.json` / `read_config.json` once at startup and later save that whole session copy, so an alias added in one process is lost when another saves. A6's lock doesn't help: there is no short load-modify-save to wrap. Fix by reloading under `storage.locked()` and applying just the one change (add/remove/rename alias, set default, history size). |
 
 ## Docs & agent workflow
 
