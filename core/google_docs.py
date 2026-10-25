@@ -2,6 +2,7 @@ import os
 import re
 import sys
 import time
+from dataclasses import dataclass
 
 from google.auth.exceptions import RefreshError, TransportError
 from google.auth.transport.requests import Request
@@ -9,6 +10,7 @@ from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
 from googleapiclient.errors import HttpError
+from httplib2 import HttpLib2Error
 
 from .paths import data_path
 
@@ -131,7 +133,42 @@ def fetch_doc_title(service, doc_id, use_cache=True):
         return None
 
 
-def prepend_text(service, doc_id, text):
+@dataclass
+class WriteFailure:
+    """Why a write failed. kind decides what happens to the queued note:
+    "transient" and "auth" are retried automatically; "permanent" waits for /flush."""
+    kind: str
+    message: str
+
+
+_PERMANENT_HTTP = {
+    400: "Google rejected the request (400)",
+    403: "no permission to edit this document (403)",
+    404: "document not found (404) — check this alias's doc ID",
+}
+_AUTH_MESSAGE = "Google sign-in expired or was revoked — restart MyDocBot to sign in again"
+_TRANSIENT_MESSAGE = "offline or Google unavailable"
+
+
+def classify_write_error(e):
+    """Map an exception from a write to a WriteFailure. Anything unrecognised is
+    transient, which keeps the old behavior (queue and retry automatically)."""
+    if isinstance(e, HttpError):
+        status = e.resp.status
+        if status in _PERMANENT_HTTP:
+            return WriteFailure("permanent", _PERMANENT_HTTP[status])
+        if status == 401:
+            return WriteFailure("auth", _AUTH_MESSAGE)
+        return WriteFailure("transient", f"{_TRANSIENT_MESSAGE} ({status})")
+    if isinstance(e, RefreshError):
+        return WriteFailure("auth", _AUTH_MESSAGE)
+    if isinstance(e, (ConnectionError, TimeoutError, TransportError, HttpLib2Error)):
+        return WriteFailure("transient", _TRANSIENT_MESSAGE)
+    return WriteFailure("transient", f"{_TRANSIENT_MESSAGE} ({type(e).__name__}: {e})")
+
+
+def try_prepend(service, doc_id, text):
+    """Prepend text at index 1. Returns None on success, or a WriteFailure."""
     try:
         request_body = {
             'requests': [{
@@ -146,10 +183,15 @@ def prepend_text(service, doc_id, text):
                 documentId=doc_id, body=request_body
             ).execute()
         )
-        return True
+        return None
     except Exception as e:
-        print(f"Error: Failed to prepend note — {e}", file=sys.stderr)
-        return False
+        failure = classify_write_error(e)
+        print(f"Error: Failed to prepend note — {failure.message}", file=sys.stderr)
+        return failure
+
+
+def prepend_text(service, doc_id, text):
+    return try_prepend(service, doc_id, text) is None
 
 
 def parse_entries_readable(doc, count=2):

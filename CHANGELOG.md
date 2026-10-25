@@ -7,6 +7,10 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
 ## [Unreleased]
 
 ### Added
+- **`/queue`:** lists queued notes (oldest first) with the reason each one
+  failed. `/queue drop <n>` discards one (the CLI asks first; both show its
+  text), and `/queue move <n> <alias>` sends one to another alias, e.g.
+  after fixing a wrong doc ID. CLI and read/write TUI.
 - **`/tag reindex`:** rebuilds the current doc's tag index from the doc
   itself, so older notes, notes typed directly in Google Docs, and later
   edits or deletions are reflected in `/tag` and `/export <tag>`. Other
@@ -24,6 +28,11 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   Copy it to `docs_config.json`, or keep using `python main.py --add`.
 
 ### Changed
+- **Clearer "queued" messages:** a note that can't be written now says
+  why: offline, a sign-in that needs a restart, or a problem that won't fix
+  itself (document not found, no permission). Notes that failed for one of
+  those last reasons are kept but no longer retried before every new note;
+  `/flush` still retries everything.
 - **Your data now lives outside the repo,** in `~/.config/mydocbot/`
   (or `$XDG_CONFIG_HOME/mydocbot`, or `$MYDOCBOT_HOME` if set):
   `credentials.json`, `token.json`, and the four JSON data files. The first

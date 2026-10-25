@@ -35,7 +35,10 @@ class TestSubmitNote:
         service = RecordingService(failing={"doc_1"})
         result = notes.submit_note(service, "doc_1", "offline #work", now=NOW)
         assert result.status == "queued"
-        assert prs.load_pending_notes() == [{"text": "offline #work", "doc_id": "doc_1", "ts": TS}]
+        assert result.failure is not None and result.failure.kind == "transient"
+        assert prs.load_pending_notes() == [{"text": "offline #work", "doc_id": "doc_1", "ts": TS,
+                                             "error": {"kind": "transient",
+                                                       "message": result.failure.message}}]
         assert prs.load_tags_index() == {}
 
     def test_rejects_empty_without_api_call(self, tmp_pending_path, tmp_tags_index_path):
@@ -87,9 +90,9 @@ class TestSubmitOrder:
         prs.queue_note("queued 2", "doc_1", "t2")
         service = RecordingService(failing={"doc_1"})
         attempts = []
-        real_prepend = notes.google_docs.prepend_text
-        monkeypatch.setattr('core.google_docs.prepend_text',
-                            lambda s, d, t: attempts.append(t) or real_prepend(s, d, t))
+        real_try = notes.google_docs.try_prepend
+        monkeypatch.setattr('core.google_docs.try_prepend',
+                            lambda s, d, t: attempts.append(t) or real_try(s, d, t))
         result = notes.submit_note(service, "doc_1", "new", now=NOW)
         assert result.status == "queued"
         assert result.queued_behind == 2

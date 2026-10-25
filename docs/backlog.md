@@ -25,9 +25,9 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 ## Suggested order
 
-1. **F6:** permanent vs. transient write failures, and a `/queue` command.
-2. **A3:** keep the TUI responsive during network calls (reindex and offline
+1. **A3:** keep the TUI responsive during network calls (reindex and offline
    submits can block for seconds).
+2. **B9:** retry DNS failures like other network errors.
 3. **B8:** make `/search` mean the same thing in the CLI and TUI.
 
 ## Bugs
@@ -37,6 +37,7 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 | B6 | **No regression test for read-only "Today" label** | open | low | XS | tests/test_tui.py | Flagged in design decision #27: add a targeted test for `_date_key()` / `_format_date_header()`. |
 | B7 | **User input not escaped in TUI status messages** | open | low | XS | mydocbot_app.py `update_status()` callers, e.g. :370, :763, :822 | Aliases, tags, and validation messages are interpolated into Rich markup unescaped (`show_error()` already escapes). Input containing `[...]` can be swallowed or mis-styled. Carried over from CHANGELOG "Not Yet Done". |
 | B8 | **`/search` means different things in CLI and TUI** | open | med | S | core/commands.py `cmd_search()`, mydocbot_app.py `BaseNotesApp.cmd_search()` | The CLI fetches fresh from the API; both TUIs search only the session cache. Unify, or at least say so in `/help`. |
+| B9 | **DNS failures skip the retry backoff** | open | med | XS | core/google_docs.py `_api_call_with_retry()` | `httplib2.ServerNotFoundError` (no DNS, a common "offline" case) subclasses `HttpLib2Error`, not `ConnectionError`, so it isn't retried; the write fails at once. F6 classifies it as transient for messages, but retry should treat it like other network errors. Weigh against A3: each retry cycle blocks ~7 s. |
 
 ## Privacy & repo hygiene
 
@@ -51,7 +52,6 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 |---|---|---|---|---|---|---|
 | F3 | **`/undo` last note** | open | low | M | core/google_docs.py, commands, TUI | Remove the range MyDocBot just wrote at the top of the doc, but only if the top entry still matches what was written. |
 | F5 | **Hyphenated tags** | open | low | XS | core/parser.py `extract_tags()` | Allow `#project-alpha` with a regex like `#([\w-]+)` (strip a trailing `-`). Today it silently becomes `#project`. Update design decision #9 and the README. |
-| F6 | **Permanent vs. transient write failures; `/queue` command** | open | med | M | core/google_docs.py `prepend_text()`, core/parser.py, commands, TUI | A bad `doc_id` or revoked permission (403/404) is queued like an offline failure and retried forever with no explanation. Don't retry permanent errors, store the last error with each queued entry, and add `/queue` to list or drop entries. Since 2026-10-23 a doc whose queued note keeps failing also keeps its *new* notes queued behind it (by design, to keep order), so this matters more. A sign-in revoked *mid-session* also lands here: the token refresh fails inside the write, `prepend_text()` catches the `RefreshError`, and the note is queued with no hint to restart (startup is handled since B4, 2026-10-24). |
 | F7 | **Configurable note formats per alias** | open | low | L | core/google_docs.py, core/config.py | Replace the two hard-coded parsers with a format setting per alias, so the read-only TUI can browse other doc layouts without new code. |
 | F8 | **Tag autocomplete in TUI** | open | low | M | mydocbot_app.py | Suggest known tags from `tags_index.json` when the user types `#` in the read/write TUI input (`on_text_area_changed`). |
 | F9 | **Multi-doc tag aggregation** | open | low | S | core/commands.py `cmd_tag_*`, mydocbot_app.py | An `--all` flag for `/tag` commands to aggregate across all configured docs, not just the active one. `/tag reindex` (F4) is per-doc too; `--all` there would loop over the aliases. |

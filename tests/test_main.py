@@ -16,6 +16,7 @@ from unittest.mock import MagicMock, patch
 import pytest
 
 import main as main_module
+from core.google_docs import WriteFailure
 
 REAL_STDIN_NOTE = main_module._stdin_note  # saved before the autouse fixture patches it
 
@@ -50,8 +51,14 @@ def _run_main_with_inputs(inputs, *, prepend_ok=True, pending=0, flushed=(),
         }):
             with patch('main.google_docs.get_service', return_value=mock_service):
                 with patch('main.google_docs.fetch_doc_title', return_value="My Log"):
-                    with patch('main.google_docs.prepend_text', return_value=prepend_ok):
-                        with patch('main.parser.count_pending', return_value=pending):
+                    # submit_note() writes through try_prepend(): None = sent.
+                    failure = None if prepend_ok else WriteFailure("transient", "offline or Google unavailable")
+                    with patch('main.google_docs.try_prepend', return_value=failure):
+                        # count_pending(doc_id) is submit_note()'s "still queued for this doc?"
+                        # check; keep it 0 so the write is really attempted. The total
+                        # (no doc_id) drives the prompt and messages.
+                        with patch('main.parser.count_pending',
+                                   side_effect=lambda doc_id=None: 0 if doc_id else pending):
                             with patch('main.parser.index_note') as mock_index:
                                 with patch('main.parser.flush_pending_notes', return_value=list(flushed)) as mock_flush:
                                     with patch('main.parser.queue_note') as mock_queue:
@@ -89,7 +96,7 @@ class TestMainParserIsNotArgparse:
         mock_flush.assert_called_once()
 
     def test_queue_note_called_on_failure(self):
-        """parser.queue_note() must be called when prepend_text returns False."""
+        """parser.queue_note() must be called when the write fails."""
         inputs = ["offline note", "", "exit"]
         _, _, mock_queue = _run_main_with_inputs(inputs, prepend_ok=False, pending=1)
         mock_queue.assert_called_once()
@@ -112,7 +119,7 @@ class TestMainSubmitOutput:
             }):
                 with patch('main.google_docs.get_service', return_value=MagicMock()):
                     with patch('main.google_docs.fetch_doc_title', return_value="My Log"):
-                        with patch('main.google_docs.prepend_text', return_value=True):
+                        with patch('main.google_docs.try_prepend', return_value=None):
                             with patch('main.parser.count_pending', return_value=0):
                                 with patch('main.parser.index_note'):
                                     with patch('main.parser.flush_pending_notes', return_value=[]):
@@ -131,8 +138,10 @@ class TestMainSubmitOutput:
             }):
                 with patch('main.google_docs.get_service', return_value=MagicMock()):
                     with patch('main.google_docs.fetch_doc_title', return_value="My Log"):
-                        with patch('main.google_docs.prepend_text', return_value=False):
-                            with patch('main.parser.count_pending', return_value=3):
+                        with patch('main.google_docs.try_prepend',
+                                   return_value=WriteFailure("transient", "offline or Google unavailable")):
+                            with patch('main.parser.count_pending',
+                                       side_effect=lambda doc_id=None: 0 if doc_id else 3):
                                 with patch('main.parser.index_note'):
                                     with patch('main.parser.flush_pending_notes', return_value=[]):
                                         with patch('main.parser.queue_note'):
@@ -151,7 +160,7 @@ class TestMainSubmitOutput:
             }):
                 with patch('main.google_docs.get_service', return_value=MagicMock()):
                     with patch('main.google_docs.fetch_doc_title', return_value="My Log"):
-                        with patch('main.google_docs.prepend_text', return_value=True):
+                        with patch('main.google_docs.try_prepend', return_value=None):
                             with patch('main.parser.count_pending', return_value=0):
                                 with patch('main.parser.index_note'):
                                     with patch('main.parser.flush_pending_notes', return_value=[{}, {}]):
@@ -336,3 +345,17 @@ class TestPrepareDataDirCalled:
         monkeypatch.setattr('main.paths.prepare_data_dir', lambda: calls.append(1))
         _one_shot(["note"], monkeypatch=monkeypatch)
         assert calls == [1]
+
+
+class TestOneShotPermanentFailure:
+    def test_permanent_failure_still_exits_queued(self, capsys, monkeypatch):
+        from core.notes import SubmitResult
+        result = SubmitResult("queued", "t", failure=WriteFailure("permanent", "document not found (404)"))
+        with patch.object(sys, 'argv', ['mydocbot', 'note']), \
+                patch('main.config.load_config', return_value=ONE_SHOT_CONFIG), \
+                patch('main.google_docs.get_service', return_value='service'), \
+                patch('main.parser.count_pending', return_value=1), \
+                patch('main.notes.submit_note', return_value=result):
+            code = main_module.main()
+        assert code == main_module.EXIT_QUEUED
+        assert "Not sent: document not found (404)" in capsys.readouterr().err

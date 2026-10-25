@@ -12,7 +12,16 @@ from textual.containers import Horizontal
 from textual.widgets import Button, Label, ListItem, ListView, RichLog, Static, TextArea
 
 from core import config, google_docs, notes, parser, validation
-from core.commands import TAG_USAGE, export_to_markdown, reindex_message, resolve_editor
+from core.commands import (
+    QUEUE_USAGE,
+    TAG_USAGE,
+    export_to_markdown,
+    parse_queue_args,
+    queue_lines,
+    queued_text,
+    reindex_message,
+    resolve_editor,
+)
 
 # Maximum number of notes kept in the in-memory session cache (per app instance),
 # shared by both MyDocBotApp and ReadOnlyApp to avoid unbounded memory growth.
@@ -582,7 +591,7 @@ class MyDocBotApp(BaseNotesApp):
         else:
             if result.flushed:
                 self.refresh_ui()
-            self.update_status(self._queued_status(result) + " /flush to retry.")
+            self.update_status(self._queued_status(result))
 
     def _add_flushed_to_cache(self, entries):
         """Add notes just written from the offline queue to the notes list.
@@ -594,10 +603,7 @@ class MyDocBotApp(BaseNotesApp):
 
     @staticmethod
     def _queued_status(result):
-        if result.queued_behind:
-            return (f"Queued behind {result.queued_behind} pending note(s) for this doc. "
-                    f"{parser.count_pending()} pending.")
-        return f"Offline — queued. {parser.count_pending()} pending."
+        return md_escape(queued_text(result))
 
     def on_button_pressed(self, event):
         if event.button.id == "submit-btn":
@@ -628,7 +634,7 @@ class MyDocBotApp(BaseNotesApp):
         elif command == '/search':
             self.cmd_search(args)
         elif command == '/flush':
-            sent = parser.flush_pending_notes(self._service)
+            sent = parser.flush_pending_notes(self._service, include_permanent=True)
             flushed = len(sent)
             if sent:
                 self._add_flushed_to_cache(sent)
@@ -640,6 +646,8 @@ class MyDocBotApp(BaseNotesApp):
             if pending:
                 parts.append(f"{pending} still pending")
             self.update_status(" | ".join(parts) if parts else "No pending notes.")
+        elif command == '/queue':
+            self.cmd_queue(args)
         elif command == '/refresh':
             self.cmd_refresh()
         elif command == '/more':
@@ -816,6 +824,43 @@ class MyDocBotApp(BaseNotesApp):
         else:
             self.update_status(TAG_USAGE)
 
+    def _show_in_preview(self, text):
+        preview = self.query_one("#preview-pane")
+        preview.clear()
+        preview.write(text)
+        preview.scroll_home(animate=False)
+
+    def cmd_queue(self, args):
+        action, position, alias = parse_queue_args(args)
+        if action == "list":
+            lines = queue_lines(self.svc_config)
+            if not lines:
+                self.update_status("No pending notes.")
+                return
+            self._show_in_preview(f"[b]Queued notes[/b] ({len(lines)}, oldest first)\n\n"
+                                  + "\n".join(md_escape(line) for line in lines))
+            return
+        if action is None:
+            self.update_status(md_escape(QUEUE_USAGE))
+            return
+        queue = parser.load_pending_notes()
+        if not 1 <= position <= len(queue):
+            self.update_status(f"No queued note #{position} (there are {len(queue)}). See /queue.")
+            return
+        if action == "drop":
+            # No y/N prompt in the TUI: show the full text so it can still be copied.
+            entry = parser.drop_pending(position)
+            self._show_in_preview(f"[b]Dropped queued note #{position}[/b] — it won't be sent:\n\n"
+                                  f"[#a6e3a1]{md_escape(entry['ts'])}[/] {md_escape(entry['text'])}")
+            self.update_status(f"Dropped note #{position}. {parser.count_pending()} pending.")
+            return
+        aliases = self.svc_config.get("aliases", {})
+        if alias not in aliases:
+            self.update_status(f"Alias '{md_escape(alias)}' not found.")
+            return
+        parser.move_pending(position, aliases[alias])
+        self.update_status(f"Note #{position} now goes to '{md_escape(alias)}', on the next note you write or /flush.")
+
     def cmd_tag_reindex(self):
         try:
             result = parser.reindex_doc(self._service, self.current_doc_id)
@@ -929,6 +974,9 @@ class MyDocBotApp(BaseNotesApp):
             "  /current                    Show active doc\n"
             "  /edit                       Open $EDITOR\n"
             "  /flush                      Retry pending offline notes\n"
+            "  /queue [list]               List queued notes and why they failed\n"
+            "  /queue drop <n>             Discard queued note n\n"
+            "  /queue move <n> <alias>     Send queued note n to another alias\n"
             "  /refresh                    Fetch latest notes from API\n"
             "  /more                       Load older notes beyond startup\n"
             "  /export [<tag>] [--file]     Export notes to Markdown file\n"

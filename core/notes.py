@@ -11,12 +11,16 @@ class SubmitResult:
     """Outcome of submit_note(). `status` is "sent", "queued", or "rejected".
     `flushed` holds the previously queued entries written before this note,
     oldest first; `queued_behind` is how many notes for the same doc were
-    still queued ahead of this one (0 unless it was queued without trying)."""
+    still queued ahead of this one (0 unless it was queued without trying).
+    `failure` says why a queued note wasn't written: this note's own failed
+    write, or, when queued behind, the stored failure of the oldest note
+    holding the doc up (None if that note never recorded one)."""
     status: str
     timestamp: str | None = None
     reason: str | None = None
     flushed: list[dict] = field(default_factory=list)
     queued_behind: int = 0
+    failure: google_docs.WriteFailure | None = None
 
 
 def format_timestamp(now=None):
@@ -44,11 +48,13 @@ def submit_note(service, doc_id, text, now=None):
     behind = parser.count_pending(doc_id)
     if behind:
         parser.queue_note(text, doc_id, timestamp)
-        return SubmitResult("queued", timestamp, flushed=flushed, queued_behind=behind)
+        return SubmitResult("queued", timestamp, flushed=flushed, queued_behind=behind,
+                            failure=parser.first_pending_failure(doc_id))
 
-    if google_docs.prepend_text(service, doc_id, f"{timestamp} {text}"):
+    failure = google_docs.try_prepend(service, doc_id, f"{timestamp} {text}")
+    if failure is None:
         parser.index_note(text, timestamp, doc_id, text)
         return SubmitResult("sent", timestamp, flushed=flushed)
 
-    parser.queue_note(text, doc_id, timestamp)
-    return SubmitResult("queued", timestamp, flushed=flushed)
+    parser.queue_note(text, doc_id, timestamp, failure)
+    return SubmitResult("queued", timestamp, flushed=flushed, failure=failure)

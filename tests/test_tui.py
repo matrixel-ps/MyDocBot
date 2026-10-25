@@ -196,3 +196,44 @@ async def test_tag_reindex_failure_shows_error(write_app, monkeypatch):
         with patch.object(write_app, 'show_error') as error:
             write_app.handle_command('/tag reindex')
         assert "Reindex failed" in error.call_args.args[0]
+
+
+@pytest.mark.asyncio
+async def test_queue_list_and_drop(write_app):
+    prs.save_pending_notes([
+        {"text": "stuck [x] note", "doc_id": "doc_old", "ts": "[10/24/26] (09:00)|",
+         "error": {"kind": "permanent", "message": "document not found (404)"}},
+        {"text": "second", "doc_id": "doc_id_123", "ts": "[10/24/26] (09:05)|"},
+    ])
+    async with write_app.run_test():
+        shown = []
+        with patch.object(write_app, '_show_in_preview', side_effect=shown.append), \
+                patch.object(write_app, 'update_status') as status:
+            write_app.handle_command('/queue')
+            assert "Queued notes" in shown[-1] and "document not found (404)" in shown[-1]
+            assert "stuck \\[x] note" in shown[-1]  # markup in note text is escaped
+            write_app.handle_command('/queue drop 1')
+        assert "stuck \\[x] note" in shown[-1]
+        assert "Dropped note #1. 1 pending." in status.call_args.args[0]
+        assert [e["text"] for e in prs.load_pending_notes()] == ["second"]
+
+
+@pytest.mark.asyncio
+async def test_queue_move_and_usage(write_app):
+    prs.save_pending_notes([{"text": "n", "doc_id": "doc_old", "ts": "t"}])
+    async with write_app.run_test():
+        with patch.object(write_app, 'update_status') as status:
+            write_app.handle_command('/queue move 1 work')
+            assert "now goes to 'work'" in status.call_args.args[0]
+            write_app.handle_command('/queue bogus')
+            assert "Usage: /queue" in status.call_args.args[0]
+    assert prs.load_pending_notes()[0]["doc_id"] == "doc_id_456"
+
+
+@pytest.mark.asyncio
+async def test_queued_status_explains_permanent(write_app):
+    from core.google_docs import WriteFailure
+    from core.notes import SubmitResult
+    async with write_app.run_test():
+        text = write_app._queued_status(SubmitResult("queued", "t", failure=WriteFailure("permanent", "no permission (403)")))
+        assert text.startswith("Not sent: no permission (403). Queued.")

@@ -630,3 +630,109 @@ class TestReindexDoc:
         """B5 + F4: tags after a date in the body are still indexed."""
         prs.reindex_doc(self._service("[06/18/26] (10:00)| Due [07/01/26] then #review\n"), "doc_a")
         assert "review" in json.loads(index_path.read_text())
+
+
+class TestQueueErrors:
+    """F6: queued entries remember why they failed; permanent failures wait for /flush."""
+
+    @pytest.fixture(autouse=True)
+    def _paths(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(prs, 'PENDING_PATH', str(tmp_path / 'pending_queue.json'))
+        monkeypatch.setattr(prs, 'TAGS_INDEX_PATH', str(tmp_path / 'tags_index.json'))
+        monkeypatch.setattr('core.google_docs.time.sleep', lambda s: None)
+
+    def _fail(self, kind="permanent", message="document not found (404)"):
+        from core.google_docs import WriteFailure
+        return WriteFailure(kind, message)
+
+    def _attempts(self, monkeypatch, results):
+        """Patch try_prepend: record (doc_id, text) and return results[doc_id] (default success)."""
+        attempts = []
+
+        def fake(service, doc_id, text):
+            attempts.append((doc_id, text))
+            return results.get(doc_id)
+        monkeypatch.setattr('core.google_docs.try_prepend', fake)
+        return attempts
+
+    def test_queue_note_stores_error(self):
+        prs.queue_note("n", "doc_a", "t1", self._fail())
+        assert prs.load_pending_notes()[0]["error"] == {"kind": "permanent", "message": "document not found (404)"}
+
+    def test_old_entries_without_error_load(self):
+        prs.save_pending_notes([{"text": "old", "doc_id": "doc_a", "ts": "t0"}])
+        assert prs.entry_failure(prs.load_pending_notes()[0]) is None
+        assert prs.first_pending_failure("doc_a") is None
+
+    def test_auto_flush_skips_permanent_head_but_flushes_others(self, monkeypatch):
+        prs.queue_note("stuck", "doc_a", "t1", self._fail())
+        prs.queue_note("behind", "doc_a", "t2")
+        prs.queue_note("fine", "doc_b", "t3", self._fail("transient", "offline"))
+        attempts = self._attempts(monkeypatch, {})
+        sent = prs.flush_pending_notes(MagicMock())
+        assert attempts == [("doc_b", "t3 fine")]
+        assert [e["text"] for e in sent] == ["fine"]
+        assert [e["text"] for e in prs.load_pending_notes()] == ["stuck", "behind"]
+
+    def test_explicit_flush_retries_permanent(self, monkeypatch):
+        prs.queue_note("stuck", "doc_a", "t1", self._fail())
+        attempts = self._attempts(monkeypatch, {})
+        sent = prs.flush_pending_notes(MagicMock(), include_permanent=True)
+        assert attempts == [("doc_a", "t1 stuck")]
+        assert len(sent) == 1 and prs.load_pending_notes() == []
+
+    @pytest.mark.parametrize("kind", ["auth", "transient"])
+    def test_auth_and_transient_retried_automatically(self, monkeypatch, kind):
+        prs.queue_note("n", "doc_a", "t1", self._fail(kind, "x"))
+        attempts = self._attempts(monkeypatch, {})
+        prs.flush_pending_notes(MagicMock())
+        assert attempts == [("doc_a", "t1 n")]
+
+    def test_failed_flush_updates_stored_error(self, monkeypatch):
+        prs.queue_note("n", "doc_a", "t1", self._fail("transient", "offline"))
+        self._attempts(monkeypatch, {"doc_a": self._fail("permanent", "no permission (403)")})
+        prs.flush_pending_notes(MagicMock())
+        assert prs.first_pending_failure("doc_a") == self._fail("permanent", "no permission (403)")
+
+    def test_first_pending_failure_is_oldest_for_doc(self):
+        prs.queue_note("x", "doc_b", "t0", self._fail("transient", "offline"))
+        prs.queue_note("a1", "doc_a", "t1", self._fail())
+        prs.queue_note("a2", "doc_a", "t2")
+        assert prs.first_pending_failure("doc_a") == self._fail()
+
+
+class TestQueueEditing:
+    @pytest.fixture(autouse=True)
+    def _paths(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(prs, 'PENDING_PATH', str(tmp_path / 'pending_queue.json'))
+        prs.save_pending_notes([
+            {"text": "one", "doc_id": "doc_a", "ts": "t1", "error": {"kind": "permanent", "message": "404"}},
+            {"text": "two", "doc_id": "doc_b", "ts": "t2"},
+            {"text": "three", "doc_id": "doc_a", "ts": "t3"},
+        ])
+
+    def test_drop_returns_entry_and_keeps_order(self):
+        assert prs.drop_pending(1)["text"] == "one"
+        assert [e["text"] for e in prs.load_pending_notes()] == ["two", "three"]
+
+    def test_drop_last_deletes_file(self):
+        for _ in range(3):
+            prs.drop_pending(1)
+        assert not os.path.exists(prs.PENDING_PATH)
+
+    @pytest.mark.parametrize("position", [0, 4, -1])
+    def test_drop_out_of_range(self, position):
+        with pytest.raises(IndexError):
+            prs.drop_pending(position)
+        assert len(prs.load_pending_notes()) == 3
+
+    def test_move_retargets_and_clears_error(self):
+        entry = prs.move_pending(1, "doc_c")
+        assert entry["doc_id"] == "doc_c" and "error" not in entry
+        queue = prs.load_pending_notes()
+        assert [(e["text"], e["doc_id"]) for e in queue] == [("one", "doc_c"), ("two", "doc_b"), ("three", "doc_a")]
+        assert "error" not in queue[0]
+
+    def test_move_out_of_range(self):
+        with pytest.raises(IndexError):
+            prs.move_pending(9, "doc_c")

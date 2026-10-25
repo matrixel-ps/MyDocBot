@@ -77,13 +77,97 @@ def export_to_markdown(entries, filepath=None):
     return path
 
 
+def queued_text(result):
+    """Why a submit_note() result was queued and what to do next; shared by the CLI and TUI."""
+    failure = result.failure
+    if result.queued_behind:
+        why = failure.message if failure else "still pending"
+        head = f"Queued behind {result.queued_behind} earlier note(s) for this doc ({why})"
+    elif failure and failure.kind != "transient":
+        head = f"Not sent: {failure.message}. Queued"
+    else:
+        head = "Queued note (offline)"
+    if failure and failure.kind == "permanent":
+        hint = "See /queue to move or drop it; /flush retries after you fix the doc"
+    else:
+        hint = "Use /flush to retry"
+    return f"{head}. {parser.count_pending()} pending. {hint}."
+
+
+QUEUE_USAGE = "Usage: /queue [list] | /queue drop <n> | /queue move <n> <alias>"
+
+
+def _alias_for(svc_config, doc_id):
+    for alias, alias_doc_id in svc_config.get("aliases", {}).items():
+        if alias_doc_id == doc_id:
+            return alias
+    return doc_id
+
+
+def queue_lines(svc_config):
+    """Numbered lines for /queue list, oldest first; shared by the CLI and TUI."""
+    lines = []
+    for position, entry in enumerate(parser.load_pending_notes(), 1):
+        preview = textwrap.shorten(entry["text"], width=60, placeholder="...")
+        line = f"{position}. {entry['ts']} [{_alias_for(svc_config, entry['doc_id'])}] {preview}"
+        failure = parser.entry_failure(entry)
+        if failure:
+            line += f" — {failure.message}"
+        lines.append(line)
+    return lines
+
+
+def parse_queue_args(args):
+    """Split /queue args into (action, position, alias); action is None when they don't parse."""
+    action = args[0] if args else "list"
+    if action == "list" and len(args) <= 1:
+        return "list", None, None
+    expected = {"drop": 2, "move": 3}.get(action)
+    if expected is None or len(args) != expected or not args[1].isdigit():
+        return None, None, None
+    return action, int(args[1]), (args[2] if action == "move" else None)
+
+
+def cmd_queue(svc_config, args):
+    action, position, alias = parse_queue_args(args)
+    if action == "list":
+        lines = queue_lines(svc_config)
+        if not lines:
+            print("No pending notes.")
+            return
+        print(f"{len(lines)} pending (oldest first):")
+        for line in lines:
+            print(f"  {line}")
+        return
+    if action is None:
+        print(QUEUE_USAGE)
+        return
+    queue = parser.load_pending_notes()
+    if not 1 <= position <= len(queue):
+        print(f"No queued note #{position} (there are {len(queue)}). See /queue.")
+        return
+    entry = queue[position - 1]
+    if action == "drop":
+        preview = textwrap.shorten(entry["text"], width=40, placeholder="...")
+        confirm = input(f"Drop queued note #{position} ({entry['ts']} {preview})? It won't be sent. [y/N] ")
+        if confirm.lower() != 'y':
+            print("Canceled.")
+            return
+        parser.drop_pending(position)
+        print(f"--- Dropped note #{position}. Its text was: ---")
+        print(entry["text"])
+        return
+    aliases = svc_config.get("aliases", {})
+    if alias not in aliases:
+        print(f"Alias '{alias}' not found.")
+        return
+    parser.move_pending(position, aliases[alias])
+    print(f"--- Note #{position} now goes to '{alias}', on the next note you write or /flush. ---")
+
+
 def queued_message(result):
     """CLI message for a submit_note() result with status "queued"."""
-    if result.queued_behind:
-        reason = f"behind {result.queued_behind} earlier note(s) still pending for this doc"
-    else:
-        reason = "(offline)"
-    return f"--- Queued note {reason}. {parser.count_pending()} pending. Use /flush to retry. ---"
+    return f"--- {queued_text(result)} ---"
 
 
 def cmd_export(service, svc_config, current_alias, current_doc_id, args):
@@ -395,6 +479,9 @@ def cmd_help():
     print("  /rename <o> <n>                Rename an alias")
     print("  /current                       Show active document info")
     print("  /flush                         Retry sending pending offline notes")
+    print("  /queue [list]                  List queued notes and why they failed")
+    print("  /queue drop <n>                Discard queued note n (asks first)")
+    print("  /queue move <n> <alias>        Send queued note n to another alias")
     print("  /search <keyword>              Search recent notes (fetches from API)")
     print("  /export [<tag>] [--file <path>]  Export notes to Markdown file")
     print("  /tag list                      Show all indexed tags")
@@ -458,8 +545,10 @@ def dispatch(service, svc_config, line, current_alias, current_doc_id):
                 return None, None
     elif command == '/rename':
         cmd_rename(svc_config, args)
+    elif command == '/queue':
+        cmd_queue(svc_config, args)
     elif command == '/flush':
-        flushed = len(parser.flush_pending_notes(service))
+        flushed = len(parser.flush_pending_notes(service, include_permanent=True))
         pending = parser.count_pending()
         if flushed:
             print(f"Flushed {flushed} pending notes.")

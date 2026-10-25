@@ -149,10 +149,56 @@ def save_pending_notes(queue):
         os.unlink(PENDING_PATH)
 
 
-def queue_note(text, doc_id, timestamp):
+def _error_dict(failure):
+    return {"kind": failure.kind, "message": failure.message}
+
+
+def entry_failure(entry):
+    """The WriteFailure stored on a queued entry, or None (old entries have none)."""
+    error = entry.get("error")
+    if not error:
+        return None
+    return google_docs.WriteFailure(error.get("kind", "transient"), error.get("message", ""))
+
+
+def queue_note(text, doc_id, timestamp, failure=None):
+    entry = {"text": text, "doc_id": doc_id, "ts": timestamp}
+    if failure is not None:
+        entry["error"] = _error_dict(failure)
     queue = load_pending_notes()
-    queue.append({"text": text, "doc_id": doc_id, "ts": timestamp})
+    queue.append(entry)
     save_pending_notes(queue)
+
+
+def first_pending_failure(doc_id):
+    """The stored failure of doc_id's oldest queued note, i.e. what's holding the doc up."""
+    for entry in load_pending_notes():
+        if entry["doc_id"] == doc_id:
+            return entry_failure(entry)
+    return None
+
+
+def drop_pending(position):
+    """Remove and return the queued entry at 1-based position. Raises IndexError."""
+    queue = load_pending_notes()
+    if not 1 <= position <= len(queue):
+        raise IndexError(position)
+    entry = queue.pop(position - 1)
+    save_pending_notes(queue)
+    return entry
+
+
+def move_pending(position, doc_id):
+    """Re-target the queued entry at 1-based position to doc_id and clear its error.
+    It keeps its place in the queue, so per-doc order stays oldest first."""
+    queue = load_pending_notes()
+    if not 1 <= position <= len(queue):
+        raise IndexError(position)
+    entry = queue[position - 1]
+    entry["doc_id"] = doc_id
+    entry.pop("error", None)
+    save_pending_notes(queue)
+    return entry
 
 
 def count_pending(doc_id=None):
@@ -162,12 +208,17 @@ def count_pending(doc_id=None):
     return sum(1 for entry in queue if entry["doc_id"] == doc_id)
 
 
-def flush_pending_notes(service):
+def flush_pending_notes(service, include_permanent=False):
     """Write queued notes for every doc, oldest first, and return the entries
     that were written. Within a doc, stop at the first failure: every write
     goes to the top of the doc, so writing a later note while an earlier one
     is still queued would put them out of order, and while offline each extra
-    attempt costs another full retry cycle."""
+    attempt costs another full retry cycle.
+
+    A doc whose oldest queued note last failed permanently (bad doc ID, no
+    permission) is skipped unless include_permanent is set: retrying it before
+    every submit can't succeed until the user fixes something. /flush sets it.
+    A failed attempt stores the new error on the entry."""
     queue = load_pending_notes()
     if not queue:
         return []
@@ -178,14 +229,21 @@ def flush_pending_notes(service):
         if entry["doc_id"] in blocked:
             remaining.append(entry)
             continue
+        stored = entry_failure(entry)
+        if stored and stored.kind == "permanent" and not include_permanent:
+            blocked.add(entry["doc_id"])
+            remaining.append(entry)
+            continue
         timestamp = entry["ts"]
         entry_text = f"{timestamp} {entry['text']}"
-        if google_docs.prepend_text(service, entry["doc_id"], entry_text):
+        failure = google_docs.try_prepend(service, entry["doc_id"], entry_text)
+        if failure is None:
             # Index at flush time, not queue time: only notes that actually
             # reached the doc are in tags_index.json.
             index_note(entry["text"], timestamp, entry["doc_id"], entry["text"])
             sent.append(entry)
         else:
+            entry["error"] = _error_dict(failure)
             blocked.add(entry["doc_id"])
             remaining.append(entry)
     save_pending_notes(remaining)
