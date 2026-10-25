@@ -25,9 +25,9 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 ## Suggested order
 
-1. **D2:** stop hard-coding numbers that drift (test counts in ~8 places).
-2. **F5:** hyphenated tags (XS).
-3. **P4:** decide on the Python 3.10 minimum (XS).
+1. **F5:** hyphenated tags (XS).
+2. **P4:** decide on the Python 3.10 minimum (XS).
+3. **B7:** escape user input in TUI status messages (XS).
 
 ## Bugs
 
@@ -66,5 +66,4 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
 | D1 | **Shorten the README** | open | low | S | README.md | Still long and history-heavy in places (e.g. "Design Decisions & Known Limitations"). Keep the user-facing parts; leave history to CHANGELOG and the agent notes. |
-| D2 | **Stop hard-coding numbers that drift** | open | med | S | AGENTS.md, README.md, project-snapshot.md, `/doc-audit` skill | The test count and "N commits ahead" figures appear in ~8 places; AGENTS.md is already wrong ("5 commits ahead", "uncommitted changes" when the tree is clean). Drop them or have `/doc-audit` check them. |
 | D3 | **Add a coverage report** | open | low | XS | lint.sh / pyproject.toml, dev requirements | `pytest --cov` to show which parts of `mydocbot_app.py` are still untested. |

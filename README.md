@@ -59,7 +59,7 @@ timestamp format (see `parse_entries_readable()` below).
 - **TUI:** [Textual](https://textual.textualize.io/) 8.x (pinned to 8.2.8 in `requirements.txt`) — async widget framework (two apps: read/write and read-only)
 - **Storage:** Google Docs API (`google-api-python-client`, `google-auth-oauthlib`, OAuth 2.0)
 - **Config:** Local JSON files — `docs_config.json` (write-mode aliases), `read_config.json` (read-only aliases), and `tags_index.json` (tag index)
-- **Testing:** pytest (pinned in `requirements-dev.txt`) with monkeypatched Google API — **330 tests, 0 network needed** (includes a headless Textual `run_test()` suite for both TUI apps)
+- **Testing:** pytest (pinned in `requirements-dev.txt`) with monkeypatched Google API — no network needed (includes a headless Textual `run_test()` suite for both TUI apps)
 - **Lint/Types:** ruff (0 errors) + mypy, pinned in `requirements-dev.txt` so CI and local runs use the same versions — both are real CI gates via `lint.sh` (mypy covers `mydocbot_app.py` too, not just `core/`)
 - **CI:** GitHub Actions (`.github/workflows/ci.yml`) installs `requirements-dev.txt` and runs `lint.sh` on Python 3.10 and 3.14 for every push/PR to `main`/`dev`
 
@@ -385,8 +385,8 @@ Note body here — multiple lines preserved.
 
 ```
 .
-├── main.py                  (199 lines) CLI entry (`mydocbot`), argparse, one-shot capture, REPL loop, --read/--tui dispatch
-├── mydocbot_app.py          (1224 lines) Textual TUIs — BaseNotesApp (shared) + MyDocBotApp
+├── main.py                  CLI entry (`mydocbot`), argparse, one-shot capture, REPL loop, --read/--tui dispatch
+├── mydocbot_app.py          Textual TUIs — BaseNotesApp (shared) + MyDocBotApp
 │                            (read/write) + ReadOnlyApp, both extending BaseNotesApp
 ├── core/
 │   ├── __init__.py          Re-exports with __all__
@@ -424,7 +424,7 @@ Note body here — multiple lines preserved.
 ## Testing
 
 ```bash
-python -m pytest tests/ -v                        # All 330 tests
+python -m pytest tests/ -v                        # All tests
 python -m pytest tests/test_parser.py -v          # Parser + queue + date-filter tests
 python -m pytest tests/test_tui.py -v             # Headless Textual TUI tests
 python -m pytest tests/ -k "corrupt"              # Corrupt-JSON resilience tests
@@ -446,7 +446,7 @@ bash lint.sh                                      # ruff + mypy + pytest — all
 | `test_validation.py` | `validate_doc_id`, `validate_alias`, `validate_config`, `validate_note`, `validate_history_size` |
 | `test_tui.py` | `MyDocBotApp`/`ReadOnlyApp` mounted headlessly via Textual's `run_test()`; covers `/config` (incl. the fixed dead-code bug), `/add` alias validation, read-only mount/list/current |
 
-All tests use monkeypatched Google API and temp files — no network, no OAuth. Current total: **330 passed**.
+All tests use monkeypatched Google API and temp files — no network, no OAuth. `bash lint.sh` runs them all and must pass.
 `test_tui.py` requires `pytest-asyncio` (configured with `asyncio_mode = "auto"` in `pyproject.toml`).
 
 ---
