@@ -52,6 +52,10 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   Copy it to `docs_config.json`, or keep using `python main.py --add`.
 
 ### Changed
+- **One end-of-work step for AI agent sessions:** `/finish` runs lint once,
+  has a `doc-keeper` subagent update the changelog, README, backlog and agent
+  notes in the background, and writes the review handoff in the meantime.
+  `/task` ends with it; `/log-change` and `/review-handoff` still work alone.
 - **TUI list and preview (both TUIs):** the notes list now shows only each
   note's date and time (no preview text or tags), and the note is read in
   the preview pane, which now takes most of the width. Long notes wrap to the pane instead of scrolling
