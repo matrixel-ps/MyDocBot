@@ -9,8 +9,23 @@ These tests verify that after the fix:
   - parser.queue_note()            is called on failed (offline) submit
   - pending count is shown in the offline message
 """
+import io
 import sys
 from unittest.mock import MagicMock, patch
+
+import pytest
+
+import main as main_module
+
+REAL_STDIN_NOTE = main_module._stdin_note  # saved before the autouse fixture patches it
+
+
+@pytest.fixture(autouse=True)
+def _stdin_is_terminal(monkeypatch):
+    """pytest's stdin isn't a TTY (and read() raises), which would send main()
+    down the piped one-shot path. REPL tests run as if typed at a terminal;
+    one-shot tests override _stdin_note themselves."""
+    monkeypatch.setattr(main_module, '_stdin_note', lambda: None)
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -221,3 +236,103 @@ class TestMainIndexNoteArgs:
         # index_note(full_note, timestamp, doc_id, full_note)
         assert call_args[0][0] == note_text      # text
         assert call_args[0][2] == "doc_id_abc123"  # doc_id
+
+
+# ---------------------------------------------------------------------------
+# One-shot capture (F1)
+# ---------------------------------------------------------------------------
+
+ONE_SHOT_CONFIG = {"default": "log", "aliases": {"log": "doc_id_log", "work": "doc_id_work"}}
+
+
+def _one_shot(argv, *, status="sent", stdin=None, config=None, monkeypatch=None):
+    """Run main() with argv and a mocked submit_note(); return (exit_code, submit_mock)."""
+    from core.notes import SubmitResult
+    result = {
+        "sent": SubmitResult("sent", "[10/24/26] (09:00)|"),
+        "queued": SubmitResult("queued", "[10/24/26] (09:00)|"),
+        "rejected": SubmitResult("rejected", reason="Note cannot be empty"),
+    }[status]
+    if stdin is not None:
+        monkeypatch.setattr(main_module, '_stdin_note', lambda: stdin)
+    with patch.object(sys, 'argv', ['mydocbot', *argv]), \
+            patch('main.config.load_config', return_value=config or ONE_SHOT_CONFIG), \
+            patch('main.google_docs.get_service', return_value='service'), \
+            patch('main.parser.count_pending', return_value=1), \
+            patch('main.notes.submit_note', return_value=result) as submit, \
+            patch('builtins.input', side_effect=AssertionError("REPL must not start")):
+        code = main_module.main()
+    return code, submit
+
+
+class TestOneShot:
+    def test_note_argument_goes_to_default_doc(self, capsys, monkeypatch):
+        code, submit = _one_shot(["met", "with", "Sam", "#standup"], monkeypatch=monkeypatch)
+        assert code == main_module.EXIT_SENT
+        submit.assert_called_once_with('service', 'doc_id_log', 'met with Sam #standup')
+        assert "Prepended to log" in capsys.readouterr().out
+
+    def test_doc_flag_picks_alias(self, monkeypatch):
+        code, submit = _one_shot(["-d", "work", "note"], monkeypatch=monkeypatch)
+        assert code == main_module.EXIT_SENT
+        assert submit.call_args.args[1] == 'doc_id_work'
+
+    def test_piped_stdin(self, monkeypatch):
+        code, submit = _one_shot(["-d", "work"], stdin="line one\nline two\n", monkeypatch=monkeypatch)
+        assert code == main_module.EXIT_SENT
+        submit.assert_called_once_with('service', 'doc_id_work', 'line one\nline two')
+
+    def test_argument_wins_over_stdin(self, monkeypatch):
+        _, submit = _one_shot(["from", "args"], stdin="from stdin", monkeypatch=monkeypatch)
+        assert submit.call_args.args[2] == 'from args'
+
+    def test_queued_exit_code(self, capsys, monkeypatch):
+        code, _ = _one_shot(["note"], status="queued", monkeypatch=monkeypatch)
+        assert code == main_module.EXIT_QUEUED
+        assert "Queued" in capsys.readouterr().err
+
+    def test_rejected_exit_code(self, capsys, monkeypatch):
+        code, _ = _one_shot([], status="rejected", stdin="", monkeypatch=monkeypatch)
+        assert code == main_module.EXIT_ERROR
+        assert "Note rejected" in capsys.readouterr().err
+
+    def test_unknown_alias(self, capsys, monkeypatch):
+        code, submit = _one_shot(["-d", "nope", "note"], monkeypatch=monkeypatch)
+        assert code == main_module.EXIT_ERROR
+        submit.assert_not_called()
+        err = capsys.readouterr().err
+        assert "'nope' not found" in err and "log" in err
+
+    def test_no_docs_configured(self, capsys, monkeypatch):
+        code, submit = _one_shot(["note"], config={"default": "", "aliases": {}}, monkeypatch=monkeypatch)
+        assert code == main_module.EXIT_ERROR
+        submit.assert_not_called()
+
+    def test_note_with_mode_flag_is_usage_error(self, monkeypatch):
+        with pytest.raises(SystemExit) as exc:
+            _one_shot(["--list", "note"], monkeypatch=monkeypatch)
+        assert exc.value.code == 2
+
+    def test_stdin_ignored_for_list(self, capsys, monkeypatch):
+        code, submit = _one_shot(["--list"], stdin="piped", monkeypatch=monkeypatch)
+        assert code is None
+        submit.assert_not_called()
+        assert "doc_id_log" in capsys.readouterr().out
+
+
+class TestStdinNote:
+    def test_terminal_returns_none(self, monkeypatch):
+        monkeypatch.setattr(sys, 'stdin', MagicMock(isatty=lambda: True))
+        assert REAL_STDIN_NOTE() is None
+
+    def test_pipe_is_read(self, monkeypatch):
+        monkeypatch.setattr(sys, 'stdin', io.StringIO("piped note\n"))
+        assert REAL_STDIN_NOTE() == "piped note\n"
+
+
+class TestPrepareDataDirCalled:
+    def test_main_prepares_data_dir(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr('main.paths.prepare_data_dir', lambda: calls.append(1))
+        _one_shot(["note"], monkeypatch=monkeypatch)
+        assert calls == [1]

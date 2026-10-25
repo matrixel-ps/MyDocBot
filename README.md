@@ -47,6 +47,7 @@ timestamp format (see `parse_entries_readable()` below).
 | `parser.py` | Tags, search, offline queue, date filters | `extract_tags()`, `index_note()`, `search_cache()`, `queue_note()`, `count_pending()`, `flush_pending_notes()`, `parse_date_flags()`, `filter_tag_entries_by_date()` |
 | `validation.py` | Input guards | `validate_doc_id()`, `validate_alias()`, `validate_config()`, `validate_note()`, `validate_history_size()` |
 | `notes.py` | The single note write path (CLI + TUI) | `submit_note()` → `SubmitResult`, `format_timestamp()` |
+| `paths.py` | Where personal data lives, first-run migration | `resolve_data_dir()`, `data_path()`, `prepare_data_dir()` |
 | `commands.py` | CLI command handlers | `dispatch()`, all `cmd_*()` functions, `resolve_editor()`, `open_editor()`, `export_to_markdown()` |
 
 ---
@@ -58,7 +59,7 @@ timestamp format (see `parse_entries_readable()` below).
 - **TUI:** [Textual](https://textual.textualize.io/) 0.41+ — async widget framework (two apps: read/write and read-only)
 - **Storage:** Google Docs API (`google-api-python-client`, `google-auth-oauthlib`, OAuth 2.0)
 - **Config:** Local JSON files — `docs_config.json` (write-mode aliases), `read_config.json` (read-only aliases), and `tags_index.json` (tag index)
-- **Testing:** pytest 7.4+ with monkeypatched Google API — **196 tests, 0 network needed** (includes a headless Textual `run_test()` suite for both TUI apps)
+- **Testing:** pytest 7.4+ with monkeypatched Google API — **221 tests, 0 network needed** (includes a headless Textual `run_test()` suite for both TUI apps)
 - **Lint/Types:** ruff (0 errors) + mypy — both are real CI gates via `lint.sh` (mypy covers `mydocbot_app.py` too, not just `core/`)
 - **CI:** GitHub Actions (`.github/workflows/ci.yml`) runs `lint.sh` on every push/PR to `main`/`dev`
 
@@ -147,36 +148,74 @@ timestamp format (see `parse_entries_readable()` below).
 1. Go to [Google Cloud Console](https://console.cloud.google.com)
 2. Create a project, enable the **Google Docs API**
 3. Create OAuth 2.0 credentials (Desktop application type)
-4. Download `credentials.json` to project root
+4. Download it as `credentials.json` into the data directory (see below)
 
-### 2. Install dependencies
+### 2. Install
 
 ```bash
-pip install -r requirements.txt
+pipx install -e .            # global `mydocbot` command (or: uv tool install -e .)
+# or, inside a virtualenv:
+pip install -e .             # `mydocbot` while the venv is active
+pip install -r requirements.txt   # also installs the test tools
 ```
+
+`python main.py` still works from the repo, with the same flags.
+
+### Data directory
+
+All personal files (`credentials.json`, `token.json`, `docs_config.json`,
+`read_config.json`, `tags_index.json`, `pending_queue.json`) live in one
+directory, the first that applies:
+
+1. `$MYDOCBOT_HOME`
+2. `$XDG_CONFIG_HOME/mydocbot`
+3. `~/.config/mydocbot`
+
+It is created `0700` on first run. **Upgrading from an older version:** if
+that directory doesn't exist yet, the first run copies those files from the
+repo root (their old location) and lists what it copied. The originals are
+left in place; delete them once everything works. Migration only ever
+happens when the directory is first created.
+The repo root is found from the installed code, so migration needs an
+editable install (`-e`) or `python main.py`; otherwise copy the files by hand.
 
 ### 3. Add a document alias
 
 ```bash
-python main.py --add log <google_doc_id>
+mydocbot --add log <google_doc_id>
 ```
 
 Doc ID from URL: `https://docs.google.com/document/d/THIS_IS_THE_ID/edit`
 
-Or copy `docs_config.example.json` to `docs_config.json` and replace
-`YOUR_GOOGLE_DOC_ID`. Your config, tag index, and offline queue are personal
-data and are gitignored; only the example file is tracked.
+Or copy `docs_config.example.json` to `docs_config.json` in the data
+directory and replace `YOUR_GOOGLE_DOC_ID`.
 
 ### 4. Run
 
 ```bash
-python main.py              # CLI mode (default)
-python main.py --tui        # Read/write TUI mode
-python main.py --read       # Read-only TUI mode (uses read_config.json default)
-python main.py --read log2  # Read-only TUI mode, starting on a specific alias
-python main.py --doc work   # Start CLI with specific alias
-python main.py --list       # List all configured (write-mode) aliases
+mydocbot                    # CLI mode (default)
+mydocbot --tui              # Read/write TUI mode
+mydocbot --read             # Read-only TUI mode (uses read_config.json default)
+mydocbot --read log2        # Read-only TUI mode, starting on a specific alias
+mydocbot --doc work         # Start CLI with specific alias
+mydocbot --list             # List all configured (write-mode) aliases
 ```
+
+### Quick capture (one note, no REPL)
+
+```bash
+mydocbot "met with Sam #standup"       # write to the default doc and exit
+mydocbot -d work "call the vendor"     # write to another alias
+echo "built from a script" | mydocbot -d work   # note read from stdin
+git log -1 --format=%s | mydocbot      # anything piped in becomes the note
+```
+
+It goes through the same path as the REPL: validation, offline queueing,
+`#tag` indexing, and writing any queued notes first. Success prints one line
+to stdout; errors go to stderr. Exit codes: `0` sent, `1` rejected or
+config error (e.g. unknown alias), `2` usage error, `3` queued offline.
+Piping text into `mydocbot` now always means "write this note"; to drive
+the REPL from a script, use a pseudo-terminal or the one-shot form instead.
 
 ---
 
@@ -305,6 +344,8 @@ Independent from `docs_config.json` — managed separately via `/add` inside `--
 
 ### File origins
 
+All of these live in the [data directory](#data-directory), not the repo.
+
 | File | Origin | Purpose |
 |---|---|---|
 | `credentials.json` | Downloaded from Google Cloud | OAuth client config |
@@ -338,7 +379,7 @@ Note body here — multiple lines preserved.
 
 ```
 .
-├── main.py                  (146 lines) CLI entry, argparse, REPL loop, --read/--tui dispatch
+├── main.py                  (199 lines) CLI entry (`mydocbot`), argparse, one-shot capture, REPL loop, --read/--tui dispatch
 ├── mydocbot_app.py          (1054 lines) Textual TUIs — BaseNotesApp (shared) + MyDocBotApp
 │                            (read/write) + ReadOnlyApp, both extending BaseNotesApp
 ├── core/
@@ -348,10 +389,12 @@ Note body here — multiple lines preserved.
 │   ├── google_docs.py       OAuth, prepend_text→bool, retry, parse_entries(+readable), title cache
 │   ├── notes.py             submit_note() — the single write path (validate, flush, prepend, index, queue)
 │   ├── parser.py            Tags, search_cache, offline queue, date filters
+│   ├── paths.py             Data directory ($MYDOCBOT_HOME / XDG / ~/.config/mydocbot), first-run migration
 │   └── validation.py        validate_doc_id, validate_alias, validate_config, validate_note, validate_history_size
 ├── tests/
-│   ├── conftest.py           Fixtures: config/read-config/tags/pending paths, mock_service, doc builder
-│   ├── test_main.py          main() REPL loop, --add flag, pending count display
+│   ├── conftest.py           Fixtures: autouse data-dir isolation, config/read-config/tags/pending paths, mock_service, doc builder
+│   ├── test_main.py          main() REPL loop, --add flag, pending count display, one-shot capture
+│   ├── test_paths.py         Data-dir resolution and one-time migration
 │   ├── test_notes.py         submit_note(): sent/queued/rejected, offline-queue order
 │   ├── test_google_docs.py   get_service() sign-in: refresh, revoked/corrupt token, offline
 │   ├── test_config.py        Config CRUD + corrupt JSON fallback (write & read)
@@ -361,15 +404,9 @@ Note body here — multiple lines preserved.
 │   ├── test_editor.py        resolve_editor() fallback chain
 │   ├── test_validation.py    doc_id, alias, config, note, history_size validators
 │   └── test_tui.py           Headless Textual run_test() suite for MyDocBotApp/ReadOnlyApp
-├── docs_config.example.json  Example write-mode config with a placeholder doc ID (tracked)
-├── docs_config.json          Write-mode alias config (gitignored, 0600 permissions)
-├── read_config.json          Read-only-mode alias config (gitignored, 0600 permissions)
-├── tags_index.json           Auto-generated tag index (gitignored)
-├── pending_queue.json        Auto-generated offline queue (gitignored; present only when notes are queued)
-├── credentials.json          Google OAuth credentials (you provide)
-├── token.json                Auto-generated OAuth token (gitignored, 0600 permissions)
+├── docs_config.example.json  Example write-mode config with a placeholder doc ID
 ├── .github/workflows/ci.yml  GitHub Actions: lint.sh on push/PR to main/dev
-├── pyproject.toml            ruff + mypy + pytest-asyncio config
+├── pyproject.toml            Package metadata + `mydocbot` entry point; ruff, mypy, pytest-asyncio config
 ├── lint.sh                   CI gate: ruff → mypy → pytest (all must pass)
 ├── CHANGELOG.md               Notable changes, most-recent-first
 └── requirements.txt          textual, rich, pytest, pytest-asyncio, google-api packages
@@ -380,7 +417,7 @@ Note body here — multiple lines preserved.
 ## Testing
 
 ```bash
-python -m pytest tests/ -v                        # All 196 tests
+python -m pytest tests/ -v                        # All 221 tests
 python -m pytest tests/test_parser.py -v          # Parser + queue + date-filter tests
 python -m pytest tests/test_tui.py -v             # Headless Textual TUI tests
 python -m pytest tests/ -k "corrupt"              # Corrupt-JSON resilience tests
@@ -390,7 +427,8 @@ bash lint.sh                                      # ruff + mypy + pytest — all
 
 | File | Coverage |
 |---|---|
-| `test_main.py` | REPL submit/queue/flush, `--add` flag validation, pending count in prompt |
+| `test_main.py` | REPL submit/queue/flush, `--add` flag validation, pending count in prompt, one-shot capture (args, stdin, `-d`, exit codes) |
+| `test_paths.py` | Data-dir precedence, `0700` creation, one-time copy-only migration (never into an existing dir) |
 | `test_config.py` | Load, save, resolve, corrupt JSON fallback + warning (write & read-only config) |
 | `test_notes.py` | `submit_note()`: sent / queued / rejected, queued notes written first and in order, queue-behind, all-docs flush |
 | `test_google_docs.py` | `get_service()`: valid/refreshed token, revoked or corrupt token re-runs sign-in, offline startup exits and keeps the token |
@@ -401,7 +439,7 @@ bash lint.sh                                      # ruff + mypy + pytest — all
 | `test_validation.py` | `validate_doc_id`, `validate_alias`, `validate_config`, `validate_note`, `validate_history_size` |
 | `test_tui.py` | `MyDocBotApp`/`ReadOnlyApp` mounted headlessly via Textual's `run_test()`; covers `/config` (incl. the fixed dead-code bug), `/add` alias validation, read-only mount/list/current |
 
-All tests use monkeypatched Google API and temp files — no network, no OAuth. Current total: **196 passed**.
+All tests use monkeypatched Google API and temp files — no network, no OAuth. Current total: **221 passed**.
 `test_tui.py` requires `pytest-asyncio` (configured with `asyncio_mode = "auto"` in `pyproject.toml`).
 
 ---
@@ -419,7 +457,7 @@ All tests use monkeypatched Google API and temp files — no network, no OAuth. 
 - **`resolve_editor()` shared:** Both CLI and TUI call the same `resolve_editor()` from `core/commands.py`. Editor fallback order: `$EDITOR` → `vim` → `nano` → `vi`.
 - **Independent read/write configs:** `docs_config.json` and `read_config.json` are separate registries so the same alias name can point to different docs (or exist in only one mode) without conflict.
 - **Read-only mode has no write path:** `ReadOnlyApp` never calls `prepend_text()` — it only fetches and displays, using its own timestamp format parser (`parse_entries_readable()`).
-- **OAuth token file:** `token.json` lives in the project root, is gitignored, and is written with `0600` permissions.
+- **OAuth token file:** `token.json` lives in the data directory (outside the repo) and is written with `0600` permissions.
 - **Alias validation:** `validate_alias()` rejects whitespace and leading `/` in alias names, since aliases are matched via whitespace-split command parsing (`line.strip().split()`); an alias with a space would otherwise silently break `/switch`, `/remove`, etc.
 - **Doc title cache:** `fetch_doc_title()` caches successful results in-process per `doc_id` to avoid redundant API round-trips across `/list`, `/switch`, and startup; `/refresh` explicitly invalidates the current doc's cached title.
 - **Shared constants:** `NOTES_CACHE_LIMIT` (500), `validation.DEFAULT_HISTORY_SIZE` (20), and `validation.MIN_HISTORY_SIZE`/`MAX_HISTORY_SIZE` (1/500) are defined once and referenced everywhere the value is needed (help text, validation, cache trimming) instead of being duplicated as magic numbers.
@@ -452,9 +490,10 @@ Known bugs, planned features, and improvement ideas are tracked in one place:
 ## Quickstart
 
 - [ ] Enable Google Docs API in Cloud Console
-- [ ] Download `credentials.json` to project root
-- [ ] `pip install -r requirements.txt`
-- [ ] `python main.py --add mynotes <doc_id>`
-- [ ] `python main.py` (first run triggers OAuth browser flow)
-- [ ] `python main.py --tui` for the date-grouped read/write TUI
-- [ ] `python main.py --read` for the browse-only TUI (needs its own alias via `/add` once inside)
+- [ ] `pipx install -e .` (or `pip install -e .` in a venv)
+- [ ] Download `credentials.json` into `~/.config/mydocbot/` (or `$MYDOCBOT_HOME`)
+- [ ] `mydocbot --add mynotes <doc_id>`
+- [ ] `mydocbot` (first run triggers OAuth browser flow)
+- [ ] `mydocbot "a quick note #tag"` to write one note and exit
+- [ ] `mydocbot --tui` for the date-grouped read/write TUI
+- [ ] `mydocbot --read` for the browse-only TUI (needs its own alias via `/add` once inside)
