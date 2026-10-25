@@ -787,3 +787,15 @@ class TestSearchEntries:
         cache = [{"ts": ts, "text": body, "doc_id": "d"} for ts, body in self.ENTRIES]
         assert [(n["ts"], n["text"]) for n in prs.search_cache(cache, "d", "SPRINT")] == \
             prs.search_entries(self.ENTRIES, "SPRINT")
+
+
+class TestDateFilterFourDigitYear:
+    """A1: --since/--until with a 4-digit year compared 2026 against a note's 26."""
+
+    ENTRY = [{"ts": "[06/15/26] (10:00)|", "doc_id": "d", "preview": "x"}]
+
+    def test_since_four_digit_year_includes_later_note(self):
+        assert prs.filter_tag_entries_by_date(self.ENTRY, since="06/01/2026") == self.ENTRY
+
+    def test_until_four_digit_year_excludes_later_note(self):
+        assert prs.filter_tag_entries_by_date(self.ENTRY, until="05/31/2026") == []

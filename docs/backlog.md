@@ -25,9 +25,9 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 ## Suggested order
 
-1. **A1:** timestamp parsing helper (XS).
-2. **A4:** merge duplicated text-extraction code (XS).
-3. **D3:** add a coverage report (XS).
+1. **A4:** merge duplicated text-extraction code (XS).
+2. **D3:** add a coverage report (XS).
+3. **A6:** atomic writes for the JSON data files (start of A6).
 
 ## Bugs
 
@@ -53,7 +53,6 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
-| A1 | **Timestamp parsing helper** | open | low | XS | core/parser.py `filter_tag_entries_by_date()`, mydocbot_app.py `MyDocBotApp._date_key()`, core/google_docs.py `parse_entries()` | The *formatting* half is done: `core.notes.format_timestamp()` / `TIMESTAMP_FORMAT` (2026-10-23, with A2). Parsing still slices `ts[1:9]` and re-states the format in regexes. Add `parse_timestamp()` next to `format_timestamp()`. |
 | A4 | **Merge duplicated text-extraction code** | open | low | XS | core/google_docs.py | `parse_entries()` and `parse_entries_readable()` share their first 12 lines word for word; extract `_doc_text(doc)`. |
 | A5 | **True pagination for `/more`** | open | low | M | mydocbot_app.py `cmd_more()`, core/google_docs.py | `/more` re-downloads and re-parses the whole doc to show a few older notes: `O(doc size)` per call as the doc grows. |
 | A6 | **File locking for concurrent CLI + TUI use** | open | low | M | core/config.py, core/parser.py | No locking around `docs_config.json`, `read_config.json`, `tags_index.json`, `pending_queue.json` when the CLI and a TUI run against the same directory at once. Atomic write-then-rename is a cheaper first step. |

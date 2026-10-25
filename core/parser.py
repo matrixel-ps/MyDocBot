@@ -8,6 +8,7 @@ from dataclasses import dataclass
 
 from . import google_docs
 from .paths import data_path
+from .timestamps import parse_date_flag, parse_timestamp
 
 TAGS_INDEX_PATH = data_path('tags_index.json')
 PENDING_PATH = data_path('pending_queue.json')
@@ -118,11 +119,6 @@ def search_cache(cache, doc_id, keyword):
     return [n for n in cache
             if n["doc_id"] == doc_id
             and _matches(n["text"], keyword)]
-
-
-def _parse_date(date_str):
-    month, day, year = date_str.split("/")
-    return (int(year), int(month), int(day))
 
 
 def parse_date_flags(args):
@@ -271,21 +267,21 @@ def filter_tag_entries_by_date(entries, since=None, until=None):
     if not since and not until:
         return entries
     try:
-        since_tuple = _parse_date(since) if since else None
-        until_tuple = _parse_date(until) if until else None
-    except (ValueError, IndexError):
+        since_date = parse_date_flag(since) if since else None
+        until_date = parse_date_flag(until) if until else None
+    except ValueError:
         print("Warning: invalid date filter (expected MM/DD/YY)", file=sys.stderr)
         return entries
     result = []
     for e in entries:
         try:
-            date_tuple = _parse_date(e["ts"][1:9])
-        except (ValueError, IndexError):
+            note_date = parse_timestamp(e["ts"]).date()
+        except ValueError:
             print(f"Warning: skipping entry with malformed timestamp: {e.get('ts', '')!r}", file=sys.stderr)
             continue
-        if since_tuple and date_tuple < since_tuple:
+        if since_date and note_date < since_date:
             continue
-        if until_tuple and date_tuple > until_tuple:
+        if until_date and note_date > until_date:
             continue
         result.append(e)
     return result
