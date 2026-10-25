@@ -28,6 +28,13 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   Copy it to `docs_config.json`, or keep using `python main.py --add`.
 
 ### Changed
+- **The TUI no longer freezes while talking to Google:** loading notes,
+  saving, `/switch`, `/list`, `/refresh`, `/more`, `/flush`, and
+  `/tag reindex` now run in the background. You can keep browsing notes and
+  use local commands meanwhile; the status bar shows what's running. Only
+  one Google call runs at a time, and starting another while one is running
+  asks you to try again when it's done. The TUI also opens right away and
+  loads notes after.
 - **Clearer "queued" messages:** a note that can't be written now says
   why: offline, a sign-in that needs a restart, or a problem that won't fix
   itself (document not found, no permission). Notes that failed for one of
@@ -70,6 +77,8 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   changes; `tests/test_tui.py` passes unmodified.
 
 ### Fixed
+- **TUI startup errors were hidden:** an error loading the first doc was
+  immediately replaced by "Ready" in the status bar. It now stays visible.
 - **Dates inside notes split them:** a note whose text contained a date
   like `[07/01/26]` was cut off there when read back from the doc (losing
   the rest of the note and any `#tags` after it). A new note now only starts
