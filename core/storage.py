@@ -11,6 +11,7 @@ at the same instant can still lose one update; that needs locking (backlog A6).
 import json
 import os
 import tempfile
+from datetime import datetime
 
 
 def write_text(path, text):
@@ -35,3 +36,24 @@ def write_json(path, data):
     """Atomically replace path with data as indented JSON plus a trailing newline."""
     # Serialise first, so an unserialisable value fails before any file is touched.
     write_text(path, json.dumps(data, indent=2) + "\n")
+
+
+def _stamp():
+    return datetime.now().strftime("%Y%m%d-%H%M%S")
+
+
+def quarantine(path):
+    """Move an unparseable data file to <path>.corrupt-YYYYMMDD-HHMMSS (owner-only)
+    and return the new path (B11). Moving rather than copying means later loads
+    in the session see no file (no repeat warning) and the next save starts
+    clean; the timestamp (plus -N if needed) means no backup is ever overwritten."""
+    base = f"{path}.corrupt-{_stamp()}"
+    target, n = base, 1
+    while os.path.exists(target):
+        target, n = f"{base}-{n}", n + 1
+    os.replace(path, target)
+    try:
+        os.chmod(target, 0o600)
+    except OSError:
+        pass  # best-effort on platforms without POSIX permission support
+    return target

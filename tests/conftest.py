@@ -1,7 +1,15 @@
+import glob
 import os
 import tempfile
 
 import pytest
+
+
+def _remove_with_backups(path):
+    """Delete a temp data file and any <path>.corrupt-* backups made from it (B11)."""
+    for p in [path, *glob.glob(f"{path}.corrupt-*")]:
+        if os.path.exists(p):
+            os.unlink(p)
 
 
 @pytest.fixture(autouse=True)
@@ -40,8 +48,7 @@ def tmp_config_path(monkeypatch):
     tmp.close()
     monkeypatch.setattr('core.config.CONFIG_PATH', tmp_path)
     yield tmp_path
-    if os.path.exists(tmp_path):
-        os.unlink(tmp_path)
+    _remove_with_backups(tmp_path)
 
 
 @pytest.fixture
@@ -51,8 +58,7 @@ def tmp_read_config_path(monkeypatch):
     tmp.close()
     monkeypatch.setattr('core.config.READ_CONFIG_PATH', tmp_path)
     yield tmp_path
-    if os.path.exists(tmp_path):
-        os.unlink(tmp_path)
+    _remove_with_backups(tmp_path)
 
 
 @pytest.fixture
@@ -62,8 +68,7 @@ def tmp_tags_index_path(monkeypatch):
     tmp.close()
     monkeypatch.setattr('core.parser.TAGS_INDEX_PATH', tmp_path)
     yield tmp_path
-    if os.path.exists(tmp_path):
-        os.unlink(tmp_path)
+    _remove_with_backups(tmp_path)
 
 
 @pytest.fixture
@@ -73,8 +78,7 @@ def tmp_pending_path(monkeypatch):
     tmp.close()
     monkeypatch.setattr('core.parser.PENDING_PATH', tmp_path)
     yield tmp_path
-    if os.path.exists(tmp_path):
-        os.unlink(tmp_path)
+    _remove_with_backups(tmp_path)
 
 
 def make_doc_response(text: str) -> dict:
