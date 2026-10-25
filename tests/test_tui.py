@@ -573,3 +573,54 @@ async def test_preview_highlights_whole_hyphenated_tag(write_app):
             await pilot.pause()
         assert "[bold #f9e2af]#project-alpha[/]" in written[-1]
         assert "[bold #f9e2af]#done[/]-" in written[-1]
+
+
+# ---------------------------------------------------------------------------
+# Status text is plain text, never markup (B7)
+# ---------------------------------------------------------------------------
+
+def _status(app):
+    return str(app.query_one("#status-bar").render())
+
+
+@pytest.mark.asyncio
+async def test_status_with_closing_tag_does_not_crash(write_app):
+    """B7: `/switch [/]` used to raise MarkupError out of the handler and crash the TUI."""
+    async with mounted(write_app) as pilot:
+        write_app.handle_command('/switch [/]')
+        await pilot.pause()
+        assert _status(write_app) == "Unknown alias '[/]'"
+
+
+@pytest.mark.asyncio
+async def test_status_shows_brackets_literally(write_app):
+    async with mounted(write_app) as pilot:
+        write_app.handle_command('/switch [b]')
+        await pilot.pause()
+        assert _status(write_app) == "Unknown alias '[b]'"   # used to be "Unknown alias ''"
+        write_app.handle_command('/add [red]x doc_id_0000000000')
+        await pilot.pause()
+        assert _status(write_app) == "Added '[red]x'"   # bracketed aliases are valid
+        write_app.handle_command('/remove [red]x')
+        await pilot.pause()
+        assert _status(write_app) == "Removed '[red]x'"
+
+
+@pytest.mark.asyncio
+async def test_show_error_is_plain_text(write_app):
+    async with mounted(write_app) as pilot:
+        write_app.show_error("boom [/] and [b]x[/b]")
+        await pilot.pause()
+        assert _status(write_app) == "boom [/] and [b]x[/b]"
+
+
+@pytest.mark.asyncio
+async def test_previously_escaped_messages_have_no_backslashes(write_app):
+    async with mounted(write_app) as pilot:
+        write_app.handle_command('/queue bogus')
+        await pilot.pause()
+        assert _status(write_app).startswith("Usage: /queue [list] | /queue drop <n>")
+        assert "\\" not in _status(write_app)
+        write_app.handle_command('/queue move 1 [x]')
+        await pilot.pause()
+        assert "\\" not in _status(write_app)

@@ -25,16 +25,15 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 ## Suggested order
 
-1. **B7:** escape user input in TUI status messages (XS).
-2. **B6:** regression test for the read-only "Today" label (XS).
-3. **A1:** timestamp parsing helper (XS).
+1. **B6:** regression test for the read-only "Today" label (XS).
+2. **A1:** timestamp parsing helper (XS).
+3. **A4:** merge duplicated text-extraction code (XS).
 
 ## Bugs
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
 | B6 | **No regression test for read-only "Today" label** | open | low | XS | tests/test_tui.py | Flagged in design decision #27: add a targeted test for `_date_key()` / `_format_date_header()`. |
-| B7 | **User input not escaped in TUI status messages** | open | low | XS | mydocbot_app.py `update_status()` callers, e.g. :370, :763, :822 | Aliases, tags, and validation messages are interpolated into Rich markup unescaped (`show_error()` already escapes). Input containing `[...]` can be swallowed or mis-styled. Carried over from CHANGELOG "Not Yet Done". |
 
 ## Privacy & repo hygiene
 
