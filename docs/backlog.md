@@ -25,10 +25,8 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 ## Suggested order
 
-1. **P1:** stop tracking personal data files (lower urgency since the repo is
-   private; do it before F2, which moves those files anyway).
-2. **F1 + F2:** one-line capture and installing as a command.
-3. **F4:** `/tag reindex`.
+1. **F1 + F2:** one-line capture and installing as a command.
+2. **F4:** `/tag reindex`.
 
 ## Bugs
 
@@ -43,7 +41,6 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
-| P1 | **Stop tracking personal data files** | open | med | S | .gitignore, README.md, new `docs_config.example.json` | `docs_config.json` and `tags_index.json` are tracked and pushed (the tag index holds real note previews), and README shows the real doc ID 3 times. Untrack them (`git rm --cached`), add an example config, and use a placeholder ID in README. The repo is private (confirmed 2026-10-23), so this is hygiene, not a leak, and scrubbing history is likely unnecessary unless the repo is ever made public. |
 | P2 | **Split runtime vs. dev dependencies, pin lint tools** | open | med | S | requirements.txt, .github/workflows/ci.yml | pytest sits next to runtime packages, and CI installs unpinned ruff/mypy (local pins: `ruff==0.15.18`, `mypy==2.1.0`). Add `requirements-dev.txt` or pyproject optional-deps. |
 | P3 | **CI Python version doesn't match local** | open | low | XS | .github/workflows/ci.yml | CI runs 3.11, local is 3.14, and the stated minimum is 3.10. Use a 3.10 + 3.14 matrix. |
 
@@ -52,7 +49,7 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
 | F1 | **Quick one-line capture** | open | high | S | main.py | `mydocbot "note #tag"` / `echo ... \| mydocbot -d work` writes the note and exits, with no REPL. The biggest daily-use win; works well with shell aliases and hotkeys. |
-| F2 | **Install as a command; config in `~/.config/mydocbot/`** | open | med | M | pyproject.toml, core/config.py, core/parser.py, core/google_docs.py | A `[project.scripts]` entry point and an XDG config dir instead of the repo root, so it runs from any directory. Needs a one-time migration of the existing files. Fixes P1 for good. |
+| F2 | **Install as a command; config in `~/.config/mydocbot/`** | open | med | M | pyproject.toml, core/config.py, core/parser.py, core/google_docs.py | A `[project.scripts]` entry point and an XDG config dir instead of the repo root, so it runs from any directory. Needs a one-time migration of the existing files. The files are already gitignored (P1, 2026-10-24); moving them also keeps them out of the repo directory entirely. |
 | F3 | **`/undo` last note** | open | low | M | core/google_docs.py, commands, TUI | Remove the range MyDocBot just wrote at the top of the doc, but only if the top entry still matches what was written. |
 | F4 | **`/tag reindex`** | open | med | M | core/parser.py, commands | Rebuild `tags_index.json` from the doc via `parse_entries()`. Removes the "no historical backfill" limitation (design decision #6) and repairs damage from B2. |
 | F5 | **Hyphenated tags** | open | low | XS | core/parser.py `extract_tags()` | Allow `#project-alpha` with a regex like `#([\w-]+)` (strip a trailing `-`). Today it silently becomes `#project`. Update design decision #9 and the README. |

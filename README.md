@@ -163,6 +163,10 @@ python main.py --add log <google_doc_id>
 
 Doc ID from URL: `https://docs.google.com/document/d/THIS_IS_THE_ID/edit`
 
+Or copy `docs_config.example.json` to `docs_config.json` and replace
+`YOUR_GOOGLE_DOC_ID`. Your config, tag index, and offline queue are personal
+data and are gitignored; only the example file is tracked.
+
 ### 4. Run
 
 ```bash
@@ -259,7 +263,7 @@ all interaction is via `/`-commands run with `Ctrl+S`.
 {
   "default": "log",
   "aliases": {
-    "log": "YOUR_DOC_ID"
+    "log": "YOUR_GOOGLE_DOC_ID"
   },
   "history_size": 20
 }
@@ -281,7 +285,7 @@ Independent from `docs_config.json` — managed separately via `/add` inside `--
   "meeting": [
     {
       "ts": "[06/18/26] (14:30)|",
-      "doc_id": "YOUR_DOC_ID",
+      "doc_id": "YOUR_GOOGLE_DOC_ID",
       "preview": "Met with team to discuss sprint..."
     }
   ]
@@ -293,7 +297,7 @@ Independent from `docs_config.json` — managed separately via `/add` inside `--
 [
   {
     "text": "offline note text",
-    "doc_id": "YOUR_DOC_ID",
+    "doc_id": "YOUR_GOOGLE_DOC_ID",
     "ts": "[06/18/26] (14:31)|"
   }
 ]
@@ -305,7 +309,7 @@ Independent from `docs_config.json` — managed separately via `/add` inside `--
 |---|---|---|
 | `credentials.json` | Downloaded from Google Cloud | OAuth client config |
 | `token.json` | Generated on first auth | Cached OAuth refresh token |
-| `docs_config.json` | Created on first `--add` | Write-mode document alias registry |
+| `docs_config.json` | Created on first `--add` (or copied from `docs_config.example.json`) | Write-mode document alias registry |
 | `read_config.json` | Created on first `--read`/`--add` in read-only mode | Read-only document alias registry |
 | `tags_index.json` | Auto-populated on each submit | Local tag search index |
 | `pending_queue.json` | Auto-created on network failure | Offline note buffer |
@@ -357,10 +361,11 @@ Note body here — multiple lines preserved.
 │   ├── test_editor.py        resolve_editor() fallback chain
 │   ├── test_validation.py    doc_id, alias, config, note, history_size validators
 │   └── test_tui.py           Headless Textual run_test() suite for MyDocBotApp/ReadOnlyApp
-├── docs_config.json          Write-mode alias config (0600 permissions)
-├── read_config.json          Read-only-mode alias config (0600 permissions)
-├── tags_index.json           Auto-generated tag index
-├── pending_queue.json        Auto-generated offline queue (present only when notes are queued)
+├── docs_config.example.json  Example write-mode config with a placeholder doc ID (tracked)
+├── docs_config.json          Write-mode alias config (gitignored, 0600 permissions)
+├── read_config.json          Read-only-mode alias config (gitignored, 0600 permissions)
+├── tags_index.json           Auto-generated tag index (gitignored)
+├── pending_queue.json        Auto-generated offline queue (gitignored; present only when notes are queued)
 ├── credentials.json          Google OAuth credentials (you provide)
 ├── token.json                Auto-generated OAuth token (gitignored, 0600 permissions)
 ├── .github/workflows/ci.yml  GitHub Actions: lint.sh on push/PR to main/dev

@@ -1,0 +1,7 @@
+{
+  "default": "log",
+  "aliases": {
+    "log": "YOUR_GOOGLE_DOC_ID"
+  },
+  "history_size": 20
+}
