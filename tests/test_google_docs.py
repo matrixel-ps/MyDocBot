@@ -171,3 +171,29 @@ class TestTryPrepend:
     def test_prepend_text_still_bool(self):
         assert google_docs.prepend_text(self._service(), "doc", "t") is True
         assert google_docs.prepend_text(self._service(_http(403)), "doc", "t") is False
+
+
+class TestOfflineErrorMessages:
+    """B9: the usual "Wi-Fi off" errors read as plain offline, not as an unknown OSError."""
+
+    @pytest.mark.parametrize("error", [
+        OSError(101, "Network is unreachable"),
+        OSError(113, "No route to host"),
+        OSError(99, "Cannot assign requested address"),
+        __import__('socket').gaierror(-2, "Name or service not known"),
+    ])
+    def test_network_oserrors_are_plain_offline(self, error):
+        failure = google_docs.classify_write_error(error)
+        assert failure == google_docs.WriteFailure("transient", "offline or Google unavailable")
+
+    def test_other_oserror_keeps_detail(self):
+        failure = google_docs.classify_write_error(OSError(28, "No space left on device"))
+        assert failure.kind == "transient"
+        assert "OSError" in failure.message
+
+    @pytest.mark.parametrize("error,expected", [
+        (OSError(101, "x"), True), (__import__('httplib2').ServerNotFoundError("x"), True),
+        (OSError(28, "x"), False), (ValueError("x"), False),
+    ])
+    def test_is_offline_error(self, error, expected):
+        assert google_docs.is_offline_error(error) is expected

@@ -77,6 +77,10 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   changes; `tests/test_tui.py` passes unmodified.
 
 ### Fixed
+- **Offline message:** a write that fails because the network is
+  unreachable now says "offline or Google unavailable" instead of showing a
+  raw `OSError`. Writing while offline still queues the note at once, with
+  no retry wait.
 - **TUI startup errors were hidden:** an error loading the first doc was
   immediately replaced by "Ready" in the status bar. It now stays visible.
 - **Dates inside notes split them:** a note whose text contained a date
