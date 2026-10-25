@@ -3,6 +3,7 @@ import re
 import sys
 import time
 
+from google.auth.exceptions import RefreshError, TransportError
 from google.auth.transport.requests import Request
 from google.oauth2.credentials import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
@@ -29,15 +30,50 @@ def invalidate_title_cache(doc_id=None):
         _TITLE_CACHE.pop(doc_id, None)
 
 
+def _discard_token(reason):
+    """Delete an unusable token.json so the browser sign-in runs again."""
+    print(f"Saved Google sign-in {reason}; you'll need to sign in again.", file=sys.stderr)
+    try:
+        os.unlink(TOKEN_PATH)
+    except FileNotFoundError:
+        pass
+
+
+def _load_saved_creds():
+    if not os.path.exists(TOKEN_PATH):
+        return None
+    try:
+        return Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
+    except ValueError:
+        _discard_token("is unreadable")
+        return None
+
+
+def _refresh(creds):
+    """Refresh creds in place. Returns False if the token was rejected and discarded.
+
+    An offline refresh (TransportError) exits instead, keeping token.json:
+    the token is still good once the network is back.
+    """
+    try:
+        creds.refresh(Request())
+        return True
+    except RefreshError:
+        _discard_token("has expired or been revoked")
+        return False
+    except TransportError as e:
+        raise SystemExit(
+            f"Error: Couldn't reach Google to refresh your sign-in ({e}).\n"
+            "Check your internet connection and try again."
+        ) from None
+
+
 def get_service():
-    creds = None
-    if os.path.exists(TOKEN_PATH):
-        creds = Credentials.from_authorized_user_file(TOKEN_PATH, SCOPES)
+    creds = _load_saved_creds()
 
     if not creds or not creds.valid:
-        if creds and creds.expired and creds.refresh_token:
-            creds.refresh(Request())
-        else:
+        refreshed = creds and creds.expired and creds.refresh_token and _refresh(creds)
+        if not refreshed:
             if not os.path.exists(CREDENTIALS_PATH):
                 raise SystemExit(
                     f"Error: '{CREDENTIALS_PATH}' not found.\n"

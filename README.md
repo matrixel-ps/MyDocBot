@@ -58,7 +58,7 @@ timestamp format (see `parse_entries_readable()` below).
 - **TUI:** [Textual](https://textual.textualize.io/) 0.41+ — async widget framework (two apps: read/write and read-only)
 - **Storage:** Google Docs API (`google-api-python-client`, `google-auth-oauthlib`, OAuth 2.0)
 - **Config:** Local JSON files — `docs_config.json` (write-mode aliases), `read_config.json` (read-only aliases), and `tags_index.json` (tag index)
-- **Testing:** pytest 7.4+ with monkeypatched Google API — **189 tests, 0 network needed** (includes a headless Textual `run_test()` suite for both TUI apps)
+- **Testing:** pytest 7.4+ with monkeypatched Google API — **196 tests, 0 network needed** (includes a headless Textual `run_test()` suite for both TUI apps)
 - **Lint/Types:** ruff (0 errors) + mypy — both are real CI gates via `lint.sh` (mypy covers `mydocbot_app.py` too, not just `core/`)
 - **CI:** GitHub Actions (`.github/workflows/ci.yml`) runs `lint.sh` on every push/PR to `main`/`dev`
 
@@ -133,7 +133,7 @@ timestamp format (see `parse_entries_readable()` below).
 - **`#tag` auto-detection:** `re.findall(r'#(\w+)', text.lower())` — word characters only. Use `#project_alpha` for compound tags.
 - **Tag persistence:** After every submission, `index_note()` appends to `tags_index.json`. Duplicates (same ts + doc_id + preview) are suppressed.
 - **API retry:** `prepend_text()` (and other API calls via `_api_call_with_retry()`) retry up to 3 times on HTTP 429/5xx and connection errors, with 1 s / 2 s / 4 s exponential backoff. Non-transient errors (403, 404) are not retried.
-- **OAuth flow:** Picks up existing `token.json` or launches browser consent via `google-auth-oauthlib`. If `credentials.json` is missing, `get_service()` exits with a friendly setup message instead of a raw traceback.
+- **OAuth flow:** Picks up existing `token.json` or launches browser consent via `google-auth-oauthlib`. If `credentials.json` is missing, `get_service()` exits with a friendly setup message instead of a raw traceback. If the saved token can't be refreshed (revoked or expired) or is unreadable, it is deleted and the browser sign-in runs again; if Google can't be reached at startup, it exits with a connection message and keeps `token.json`.
 - **Config resilience:** Corrupt `docs_config.json`, `read_config.json`, `tags_index.json`, and `pending_queue.json` all fall back gracefully with a stderr warning instead of crashing.
 - **Doc title caching:** `fetch_doc_title()` caches successful lookups in-process (keyed by `doc_id`), so `/list`, `/switch`, and startup don't repeatedly re-fetch the same title. `/refresh` invalidates the cache for the current doc so external renames are picked up.
 - **File permissions:** `token.json`, `docs_config.json`, and `read_config.json` are written with owner-only (`0600`) permissions (best-effort).
@@ -349,6 +349,7 @@ Note body here — multiple lines preserved.
 │   ├── conftest.py           Fixtures: config/read-config/tags/pending paths, mock_service, doc builder
 │   ├── test_main.py          main() REPL loop, --add flag, pending count display
 │   ├── test_notes.py         submit_note(): sent/queued/rejected, offline-queue order
+│   ├── test_google_docs.py   get_service() sign-in: refresh, revoked/corrupt token, offline
 │   ├── test_config.py        Config CRUD + corrupt JSON fallback (write & read)
 │   ├── test_parser.py        Tags, parse_entries, retry, search, corrupt JSON, malformed ts
 │   ├── test_commands.py      CLI cmd_* functions, cmd_search, cmd_config, cmd_export
@@ -374,7 +375,7 @@ Note body here — multiple lines preserved.
 ## Testing
 
 ```bash
-python -m pytest tests/ -v                        # All 189 tests
+python -m pytest tests/ -v                        # All 196 tests
 python -m pytest tests/test_parser.py -v          # Parser + queue + date-filter tests
 python -m pytest tests/test_tui.py -v             # Headless Textual TUI tests
 python -m pytest tests/ -k "corrupt"              # Corrupt-JSON resilience tests
@@ -387,6 +388,7 @@ bash lint.sh                                      # ruff + mypy + pytest — all
 | `test_main.py` | REPL submit/queue/flush, `--add` flag validation, pending count in prompt |
 | `test_config.py` | Load, save, resolve, corrupt JSON fallback + warning (write & read-only config) |
 | `test_notes.py` | `submit_note()`: sent / queued / rejected, queued notes written first and in order, queue-behind, all-docs flush |
+| `test_google_docs.py` | `get_service()`: valid/refreshed token, revoked or corrupt token re-runs sign-in, offline startup exits and keeps the token |
 | `test_parser.py` | Tag CRUD, parse_entries, prepend_text retry, search_cache, date filters, corrupt JSON, malformed timestamps |
 | `test_commands.py` | All CLI commands: switch, list, add, remove, rename, current, tag, search, export, config, help |
 | `test_dispatch.py` | Dispatch `/remove` auto-switch to default/first/none |
@@ -394,7 +396,7 @@ bash lint.sh                                      # ruff + mypy + pytest — all
 | `test_validation.py` | `validate_doc_id`, `validate_alias`, `validate_config`, `validate_note`, `validate_history_size` |
 | `test_tui.py` | `MyDocBotApp`/`ReadOnlyApp` mounted headlessly via Textual's `run_test()`; covers `/config` (incl. the fixed dead-code bug), `/add` alias validation, read-only mount/list/current |
 
-All tests use monkeypatched Google API and temp files — no network, no OAuth. Current total: **189 passed**.
+All tests use monkeypatched Google API and temp files — no network, no OAuth. Current total: **196 passed**.
 `test_tui.py` requires `pytest-asyncio` (configured with `asyncio_mode = "auto"` in `pyproject.toml`).
 
 ---
