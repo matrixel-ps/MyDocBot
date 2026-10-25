@@ -6,6 +6,7 @@ import textwrap
 from datetime import datetime, timedelta
 
 from rich.markup import escape as md_escape
+from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal
@@ -411,12 +412,13 @@ class BaseNotesApp(App):
         preview.scroll_home(animate=False)
 
     def update_status(self, msg):
-        status_bar = self.query_one("#status-bar")
-        status_bar.update(msg)
+        """Show msg in the status bar as plain text, never parsed as markup (B7):
+        messages carry user input, and "[/]" in it used to crash the app."""
+        self.query_one("#status-bar").update(Text(str(msg)))
 
     def show_error(self, msg):
-        status_bar = self.query_one("#status-bar")
-        status_bar.update(f"[#f38ba8]{md_escape(str(msg))}[/]")
+        """Like update_status(), in the error colour."""
+        self.query_one("#status-bar").update(Text(str(msg), style="#f38ba8"))
 
     def action_focus_notes(self):
         self.query_one("#notes-list").focus()
@@ -446,7 +448,7 @@ class BaseNotesApp(App):
                 self._add_to_cache(ts, body, doc_id)
             self._last_selected_index = 0
             self.refresh_ui()
-            self.update_status(f"Switched to '{md_escape(alias)}' ({md_escape(title or doc_id)})")
+            self.update_status(f"Switched to '{alias}' ({title or doc_id})")
 
         self.run_api("switching documents", lambda: self._fetch_title_and_recent(doc_id, count), done)
 
@@ -525,9 +527,9 @@ class BaseNotesApp(App):
         self.run_api("searching", lambda: self._fetch_recent(doc_id, None), done, fallback)
 
     def _show_search_results(self, keyword, results, note=None):
-        suffix = f"  {md_escape(note)}" if note else ""
+        suffix = f"  {note}" if note else ""
         if not results:
-            self.update_status(f"No notes matching '{md_escape(keyword)}'.{suffix}")
+            self.update_status(f"No notes matching '{keyword}'.{suffix}")
             return
         lines = [f"[b]Search: {md_escape(keyword)}[/]   {len(results)} notes\n"]
         for ts, body in results:
@@ -541,7 +543,7 @@ class BaseNotesApp(App):
         preview.clear()
         preview.write("\n".join(lines))
         preview.scroll_home(animate=False)
-        self.update_status(f"{len(results)} match(es) for '{md_escape(keyword)}'.{suffix}")
+        self.update_status(f"{len(results)} match(es) for '{keyword}'.{suffix}")
 
     def cmd_refresh(self):
         doc_id = self.current_doc_id
@@ -707,7 +709,7 @@ class MyDocBotApp(BaseNotesApp):
 
     @staticmethod
     def _queued_status(result):
-        return md_escape(queued_text(result))
+        return queued_text(result)
 
     def on_button_pressed(self, event):
         if event.button.id == "submit-btn":
@@ -870,7 +872,7 @@ class MyDocBotApp(BaseNotesApp):
             self.current_doc_id = doc_id
             self.current_title = title or doc_id[:20] + "..."
             self.refresh_ui()
-            self.update_status(f"Switched to '{md_escape(alias)}'")
+            self.update_status(f"Switched to '{alias}'")
 
         self.run_api("switching documents", lambda: google_docs.fetch_doc_title(self._service, doc_id), done)
 
@@ -947,7 +949,7 @@ class MyDocBotApp(BaseNotesApp):
                                   + "\n".join(md_escape(line) for line in lines))
             return
         if action is None:
-            self.update_status(md_escape(QUEUE_USAGE))
+            self.update_status(QUEUE_USAGE)
             return
         if self._refuse_if_busy():  # a running call may be rewriting the queue file
             return
@@ -964,10 +966,10 @@ class MyDocBotApp(BaseNotesApp):
             return
         aliases = self.svc_config.get("aliases", {})
         if alias not in aliases:
-            self.update_status(f"Alias '{md_escape(alias)}' not found.")
+            self.update_status(f"Alias '{alias}' not found.")
             return
         parser.move_pending(position, aliases[alias])
-        self.update_status(f"Note #{position} now goes to '{md_escape(alias)}', on the next note you write or /flush.")
+        self.update_status(f"Note #{position} now goes to '{alias}', on the next note you write or /flush.")
 
     def cmd_tag_reindex(self):
         doc_id = self.current_doc_id
@@ -975,7 +977,7 @@ class MyDocBotApp(BaseNotesApp):
 
         def done(result):
             self.all_tags = parser.load_tags_index()
-            self.update_status(md_escape(reindex_message(result, label)))
+            self.update_status(reindex_message(result, label))
 
         self.run_api("reindexing tags", lambda: parser.reindex_doc(self._service, doc_id), done,
                      lambda e: self.show_error(f"Reindex failed, tag index left unchanged: {e}"))

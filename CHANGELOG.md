@@ -94,6 +94,10 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   changes; `tests/test_tui.py` passes unmodified.
 
 ### Fixed
+- **TUI crash on brackets in commands:** typing something like
+  `/switch [/]` crashed the TUI, and `[b]` in an alias, tag, or search
+  disappeared from the status bar. Status messages now always show your
+  text exactly as typed.
 - **TUI note loading now retries:** loading notes at startup and on
   `/switch`, `/refresh`, `/more`, and `/search` retries brief Google errors
   (429/5xx) like saving does, instead of failing at once.
