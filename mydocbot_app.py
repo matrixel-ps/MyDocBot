@@ -401,8 +401,8 @@ class BaseNotesApp(App):
         text = item.note_text
         preview = self.query_one("#preview-pane")
         highlighted = re.sub(
-            r'(#\w+)',
-            r'[bold #f9e2af]\1[/]',
+            parser.TAG_PATTERN,
+            r'[bold #f9e2af]#\1[/]',
             md_escape(text)
         )
         preview.clear()

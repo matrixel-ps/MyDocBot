@@ -540,3 +540,16 @@ class TestCmdQueue:
         with patch('core.commands.parser.flush_pending_notes', return_value=[]) as flush:
             dispatch('service', self.CONFIG, '/flush', 'log', 'doc_a')
         flush.assert_called_once_with('service', include_permanent=True)
+
+
+class TestHyphenatedTagCommands:
+    """F5: tag commands accept hyphenated names, with or without the #."""
+
+    @pytest.mark.parametrize("arg", ["project-alpha", "#project-alpha", "#Project-Alpha"])
+    def test_tag_search_finds_hyphenated(self, arg, tmp_tags_index_path, capsys):
+        import core.parser as prs
+        from core.commands import cmd_tag_search
+        prs.index_note("kickoff #project-alpha", "[10/24/26] (09:00)|", "doc_1", "kickoff #project-alpha")
+        cmd_tag_search({}, arg, "doc_1")
+        out = capsys.readouterr().out
+        assert "#project-alpha  (1 notes)" in out

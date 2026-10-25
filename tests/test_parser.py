@@ -32,6 +32,24 @@ class TestExtractTags:
         result = prs.extract_tags("Met with team #meeting about #project_x")
         assert result == ["meeting", "project_x"]
 
+    @pytest.mark.parametrize("text,expected", [
+        ("#project-alpha", ["project-alpha"]),           # F5: used to be "project"
+        ("#a-b-c and #x", ["a-b-c", "x"]),
+        ("#done- next", ["done"]),                       # trailing hyphen isn't part of it
+        ("#-x", []),                                     # a hyphen can't start a tag
+        ("#a--b", ["a"]),                                # a double hyphen ends it
+        ("#snake_case-and-kebab", ["snake_case-and-kebab"]),
+        ("#Project-Alpha", ["project-alpha"]),
+        ("ship #a-b. then #c-d, done", ["a-b", "c-d"]),
+        ("due #2026-10-24", ["2026-10-24"]),             # approved: date-like text is one tag
+    ])
+    def test_hyphenated(self, text, expected):
+        assert prs.extract_tags(text) == expected
+
+    def test_index_note_keeps_hyphenated_tag(self, tmp_tags_index_path):
+        prs.index_note("kickoff #project-alpha", "[10/24/26] (09:00)|", "d1", "kickoff #project-alpha")
+        assert list(prs.load_tags_index()) == ["project-alpha"]
+
 
 class TestTagsIndex:
     def test_load_missing(self, tmp_tags_index_path):

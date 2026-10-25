@@ -559,3 +559,17 @@ async def test_help_says_search_covers_whole_doc(write_app):
             write_app.handle_command('/help')
             await pilot.pause()
         assert "Search all notes in this doc" in shown[-1]
+
+
+@pytest.mark.asyncio
+async def test_preview_highlights_whole_hyphenated_tag(write_app):
+    """F5: the highlighter uses the same pattern as indexing, so the whole tag is styled."""
+    async with mounted(write_app) as pilot:
+        write_app.notes_cache = [{"ts": "[10/24/26] (09:00)|", "text": "kickoff #project-alpha #done-",
+                                  "doc_id": write_app.current_doc_id}]
+        written = []
+        with patch.object(write_app.query_one("#preview-pane"), 'write', side_effect=written.append):
+            write_app.refresh_ui()
+            await pilot.pause()
+        assert "[bold #f9e2af]#project-alpha[/]" in written[-1]
+        assert "[bold #f9e2af]#done[/]-" in written[-1]
