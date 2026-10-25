@@ -853,3 +853,15 @@ class TestDocTextExtraction:
         assert [b for _, b in parse_entries(write, count=2)] == ["n9", "n8"]
         read = _doc(*[[f"{d}/06/2026\n[10.00]\nr{d}\n"] for d in range(9, 4, -1)])
         assert [b for _, b in parse_entries_readable(read, count=2)] == ["r9", "r8"]
+
+    def test_readable_parser_accepts_colon_in_time(self):
+        """A "[HH:MM]" time line starts an entry like "[HH.MM]" does, and gets the same
+        dotted key, so it isn't dropped or glued onto the entry below it."""
+        from core.google_docs import parse_entries_readable
+        doc = _doc(["25/10/2026\n[17:33]\nnewest\n"], ["24/10/2026\n[10.30]\nolder\n"],
+                   ["23/10/2026\n[09:05]\noldest\n"])
+        assert parse_entries_readable(doc, count=None) == [
+            ("[25/10/2026] [17.33]|", "newest"),
+            ("[24/10/2026] [10.30]|", "older"),
+            ("[23/10/2026] [09.05]|", "oldest"),
+        ]

@@ -121,6 +121,10 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   changes; `tests/test_tui.py` passes unmodified.
 
 ### Fixed
+- **Read-only entries with a colon in the time were missing:** an entry
+  timed `[17:33]` instead of `[17.33]` didn't show in the read-only TUI or the
+  Discord change alerts. At the top of a doc it was skipped; lower down it
+  was merged into the entry below it. Both `[HH.MM]` and `[HH:MM]` now work.
 - **Notes lost when two windows wrote at once:** a note queued in one
   window (or by the Discord bot) while another was sending queued notes
   could be deleted, and two windows sending at the same moment could write a

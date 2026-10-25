@@ -273,6 +273,8 @@ DD/MM/YYYY
 Note body…
 ```
 
+`[HH:MM]` works too.
+
 ### Commands
 
 Type `/help` in any interface for its list.
