@@ -1,5 +1,6 @@
 from unittest.mock import MagicMock, patch
 
+import pytest
 from conftest import make_doc_response
 
 
@@ -387,3 +388,128 @@ class TestTagReindex:
         from core.commands import cmd_help
         cmd_help()
         assert "/tag reindex" in capsys.readouterr().out
+
+
+class TestQueuedText:
+    """F6: queued messages say why and what to do."""
+
+    def _result(self, failure=None, behind=0):
+        from core.notes import SubmitResult
+        return SubmitResult("queued", "t", failure=failure, queued_behind=behind)
+
+    def _text(self, result, pending=2):
+        from core.commands import queued_text
+        with patch('core.commands.parser.count_pending', return_value=pending):
+            return queued_text(result)
+
+    def test_transient(self):
+        from core.google_docs import WriteFailure
+        text = self._text(self._result(WriteFailure("transient", "offline or Google unavailable")))
+        assert text == "Queued note (offline). 2 pending. Use /flush to retry."
+
+    def test_permanent_names_reason_and_queue(self):
+        from core.google_docs import WriteFailure
+        text = self._text(self._result(WriteFailure("permanent", "document not found (404)")))
+        assert text.startswith("Not sent: document not found (404). Queued. 2 pending.")
+        assert "/queue" in text
+
+    def test_auth(self):
+        from core.google_docs import WriteFailure
+        text = self._text(self._result(WriteFailure("auth", "restart MyDocBot to sign in again")))
+        assert "Not sent: restart MyDocBot" in text and "/flush" in text
+
+    def test_queued_behind_names_blocking_error(self):
+        from core.google_docs import WriteFailure
+        text = self._text(self._result(WriteFailure("permanent", "no permission (403)"), behind=3))
+        assert text.startswith("Queued behind 3 earlier note(s) for this doc (no permission (403))")
+
+    def test_queued_behind_without_stored_error(self):
+        assert "(still pending)" in self._text(self._result(behind=1))
+
+    def test_cli_message_wraps(self):
+        from core.commands import queued_message
+        with patch('core.commands.parser.count_pending', return_value=1):
+            assert queued_message(self._result()).startswith("--- Queued note (offline).")
+
+
+class TestCmdQueue:
+    CONFIG = {"aliases": {"log": "doc_a", "work": "doc_b"}}
+
+    @pytest.fixture(autouse=True)
+    def _queue(self, tmp_path, monkeypatch):
+        import core.parser as prs
+        monkeypatch.setattr(prs, 'PENDING_PATH', str(tmp_path / 'pending_queue.json'))
+        prs.save_pending_notes([
+            {"text": "stuck note", "doc_id": "doc_old", "ts": "[10/24/26] (09:00)|",
+             "error": {"kind": "permanent", "message": "document not found (404)"}},
+            {"text": "offline note", "doc_id": "doc_a", "ts": "[10/24/26] (09:05)|"},
+        ])
+        self.prs = prs
+
+    def _run(self, args, answer=None):
+        from core.commands import cmd_queue
+        with patch('builtins.input', return_value=answer) as ask:
+            cmd_queue(self.CONFIG, args)
+        return ask
+
+    def test_list(self, capsys):
+        self._run([])
+        out = capsys.readouterr().out
+        assert "2 pending (oldest first)" in out
+        assert "1. [10/24/26] (09:00)| [doc_old] stuck note — document not found (404)" in out
+        assert "2. [10/24/26] (09:05)| [log] offline note" in out
+
+    def test_list_empty(self, capsys):
+        self.prs.save_pending_notes([])
+        self._run(['list'])
+        assert "No pending notes." in capsys.readouterr().out
+
+    def test_drop_confirmed(self, capsys):
+        ask = self._run(['drop', '1'], answer='y')
+        assert "[y/N]" in ask.call_args.args[0]
+        assert [e["text"] for e in self.prs.load_pending_notes()] == ["offline note"]
+        out = capsys.readouterr().out
+        assert "Dropped note #1" in out and "stuck note" in out
+
+    def test_drop_canceled(self, capsys):
+        self._run(['drop', '1'], answer='n')
+        assert len(self.prs.load_pending_notes()) == 2
+        assert "Canceled." in capsys.readouterr().out
+
+    def test_drop_out_of_range(self, capsys):
+        ask = self._run(['drop', '5'])
+        ask.assert_not_called()
+        assert "No queued note #5 (there are 2)" in capsys.readouterr().out
+
+    def test_move(self, capsys):
+        self._run(['move', '1', 'work'])
+        entry = self.prs.load_pending_notes()[0]
+        assert entry["doc_id"] == "doc_b" and "error" not in entry
+        assert "now goes to 'work'" in capsys.readouterr().out
+
+    def test_move_unknown_alias(self, capsys):
+        self._run(['move', '1', 'nope'])
+        assert self.prs.load_pending_notes()[0]["doc_id"] == "doc_old"
+        assert "Alias 'nope' not found." in capsys.readouterr().out
+
+    @pytest.mark.parametrize("args", [['drop'], ['drop', 'x'], ['move', '1'], ['bogus'], ['list', 'extra']])
+    def test_usage(self, args, capsys):
+        self._run(args)
+        assert "Usage: /queue" in capsys.readouterr().out
+
+    def test_dispatch_routes_queue(self, capsys):
+        from core.commands import dispatch
+        dispatch('service', self.CONFIG, '/queue', 'log', 'doc_a')
+        assert "2 pending" in capsys.readouterr().out
+
+    def test_help_lists_queue(self, capsys):
+        from core.commands import cmd_help
+        cmd_help()
+        out = capsys.readouterr().out
+        assert "/queue drop <n>" in out and "/queue move <n> <alias>" in out
+
+    def test_flush_includes_permanent(self):
+        from core.commands import dispatch
+        with patch('core.commands.parser.flush_pending_notes', return_value=[]) as flush:
+            dispatch('service', self.CONFIG, '/flush', 'log', 'doc_a')
+        flush.assert_called_once_with('service', include_permanent=True)

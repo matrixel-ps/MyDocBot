@@ -111,3 +111,63 @@ class TestGetService:
         assert result == 'service'
         flow.run_local_server.assert_called_once()
         assert token.read_text() == NEW_TOKEN
+
+
+# ---------------------------------------------------------------------------
+# Write-failure classification (F6)
+# ---------------------------------------------------------------------------
+
+def _http(status):
+    from googleapiclient.errors import HttpError
+    return HttpError(MagicMock(status=status, reason='x'), b'{}')
+
+
+class TestClassifyWriteError:
+    @pytest.mark.parametrize("status,needle", [
+        (404, "not found"), (403, "permission"), (400, "rejected"),
+    ])
+    def test_permanent_http(self, status, needle):
+        failure = google_docs.classify_write_error(_http(status))
+        assert failure.kind == "permanent"
+        assert needle in failure.message
+
+    def test_401_is_auth(self):
+        assert google_docs.classify_write_error(_http(401)).kind == "auth"
+
+    def test_refresh_error_is_auth(self):
+        failure = google_docs.classify_write_error(RefreshError("invalid_grant"))
+        assert failure.kind == "auth"
+        assert "restart" in failure.message
+
+    @pytest.mark.parametrize("error", [
+        _http(429), _http(503), ConnectionError("down"), TimeoutError("slow"),
+        TransportError("no net"), RuntimeError("something odd"),
+    ])
+    def test_transient(self, error):
+        assert google_docs.classify_write_error(error).kind == "transient"
+
+    def test_httplib2_network_error_is_transient(self):
+        import httplib2
+        failure = google_docs.classify_write_error(httplib2.ServerNotFoundError("no dns"))
+        assert failure.kind == "transient"
+        assert "offline" in failure.message
+
+
+class TestTryPrepend:
+    def _service(self, error=None):
+        service = MagicMock()
+        if error:
+            service.documents.return_value.batchUpdate.return_value.execute.side_effect = error
+        return service
+
+    def test_success_returns_none(self):
+        assert google_docs.try_prepend(self._service(), "doc", "text") is None
+
+    def test_failure_returns_classified(self, capsys):
+        failure = google_docs.try_prepend(self._service(_http(404)), "doc", "text")
+        assert failure == google_docs.WriteFailure("permanent", failure.message)
+        assert "not found" in capsys.readouterr().err
+
+    def test_prepend_text_still_bool(self):
+        assert google_docs.prepend_text(self._service(), "doc", "t") is True
+        assert google_docs.prepend_text(self._service(_http(403)), "doc", "t") is False
