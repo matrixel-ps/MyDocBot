@@ -12,7 +12,7 @@ from textual.containers import Horizontal
 from textual.widgets import Button, Label, ListItem, ListView, RichLog, Static, TextArea
 
 from core import config, google_docs, notes, parser, validation
-from core.commands import export_to_markdown, resolve_editor
+from core.commands import TAG_USAGE, export_to_markdown, reindex_message, resolve_editor
 
 # Maximum number of notes kept in the in-memory session cache (per app instance),
 # shared by both MyDocBotApp and ReadOnlyApp to avoid unbounded memory growth.
@@ -811,8 +811,19 @@ class MyDocBotApp(BaseNotesApp):
                 self.update_status("Usage: /tag search <tag> [--since MM/DD/YY] [--until MM/DD/YY]")
         elif args[0] == 'stats':
             self.cmd_tag_stats()
+        elif args[0] == 'reindex':
+            self.cmd_tag_reindex()
         else:
-            self.update_status("Usage: /tag list | /tag search <tag> [--since] [--until] | /tag stats")
+            self.update_status(TAG_USAGE)
+
+    def cmd_tag_reindex(self):
+        try:
+            result = parser.reindex_doc(self._service, self.current_doc_id)
+        except Exception as e:
+            self.show_error(f"Reindex failed, tag index left unchanged: {e}")
+            return
+        self.all_tags = parser.load_tags_index()
+        self.update_status(md_escape(reindex_message(result, self.current_title or self.current_alias)))
 
     def cmd_tag_list(self):
         tags = parser.load_tags_index()
@@ -925,6 +936,7 @@ class MyDocBotApp(BaseNotesApp):
             "  /tag list                   Show all tags\n"
             "  /tag search <tag>           Find notes by tag\n"
             "  /tag stats                  Tag frequency chart\n"
+            "  /tag reindex                Rebuild this doc's tags from the doc\n"
             "  /config show                Show config settings\n"
             "  /config set history_size    Set notes loaded on startup\n"
             "  /help                       This message\n\n"

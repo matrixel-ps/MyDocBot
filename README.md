@@ -59,7 +59,7 @@ timestamp format (see `parse_entries_readable()` below).
 - **TUI:** [Textual](https://textual.textualize.io/) 0.41+ — async widget framework (two apps: read/write and read-only)
 - **Storage:** Google Docs API (`google-api-python-client`, `google-auth-oauthlib`, OAuth 2.0)
 - **Config:** Local JSON files — `docs_config.json` (write-mode aliases), `read_config.json` (read-only aliases), and `tags_index.json` (tag index)
-- **Testing:** pytest 7.4+ with monkeypatched Google API — **221 tests, 0 network needed** (includes a headless Textual `run_test()` suite for both TUI apps)
+- **Testing:** pytest 7.4+ with monkeypatched Google API — **242 tests, 0 network needed** (includes a headless Textual `run_test()` suite for both TUI apps)
 - **Lint/Types:** ruff (0 errors) + mypy — both are real CI gates via `lint.sh` (mypy covers `mydocbot_app.py` too, not just `core/`)
 - **CI:** GitHub Actions (`.github/workflows/ci.yml`) runs `lint.sh` on every push/PR to `main`/`dev`
 
@@ -77,7 +77,7 @@ timestamp format (see `parse_entries_readable()` below).
 - **`/search <keyword>`:** Fetches recent notes from the API (up to `history_size`) and filters by keyword.
 - **`/export [<tag>] [--file <path>]`:** Exports notes to a local Markdown file — either the notes tagged with `<tag>` (from the local tag index) or the most recent notes fetched from the API if no tag is given.
 - **`/config show` / `/config set history_size <n>`:** View or change how many notes are loaded on startup/switch (range 1–500, default 20).
-- **Tag commands:** `/tag list`, `/tag search <tag>`, `/tag stats` — all operate on local `tags_index.json` only. `/tag search` supports `--since` / `--until` date filters.
+- **Tag commands:** `/tag list`, `/tag search <tag>`, `/tag stats` — all operate on local `tags_index.json` only. `/tag search` supports `--since` / `--until` date filters. `/tag reindex` rebuilds the current doc's tag entries from the whole doc (picks up older notes, notes typed directly in Google Docs, and edits/deletions); other docs' entries are kept and the previous index is saved as `tags_index.json.bak`.
 - **Offline queue:** Failed submissions are saved to `pending_queue.json`. Before each new note is written, queued notes for all docs are retried, oldest first, so the doc stays in order; if a doc's queued notes still fail, new notes for it are queued behind them. Tags in queued notes are indexed once they're written. Use `/flush` to retry manually. Pending count is shown in the prompt.
 - **Input validation:** Empty notes, oversized notes (>50 KB), and malformed doc IDs are rejected before any API call.
 - **Error resilience:** Network failures are caught — session continues, note is queued. Corrupt `docs_config.json` falls back to a fresh empty config with a stderr warning.
@@ -244,6 +244,7 @@ the REPL from a script, use a pseudo-terminal or the one-shot form instead.
 | `/tag list` | All indexed tags + note counts for current doc |
 | `/tag search <tag> [--since MM/DD/YY] [--until MM/DD/YY]` | Notes matching a tag |
 | `/tag stats` | Tag frequency bar chart |
+| `/tag reindex` | Rebuild the current doc's tags from the doc itself (backup kept as `tags_index.json.bak`) |
 | `/config show` | Show current config settings (e.g. `history_size`) |
 | `/config set history_size <1-500>` | Set how many notes are loaded on startup/switch |
 | `/help` | Show command list |
@@ -380,7 +381,7 @@ Note body here — multiple lines preserved.
 ```
 .
 ├── main.py                  (199 lines) CLI entry (`mydocbot`), argparse, one-shot capture, REPL loop, --read/--tui dispatch
-├── mydocbot_app.py          (1054 lines) Textual TUIs — BaseNotesApp (shared) + MyDocBotApp
+├── mydocbot_app.py          (1066 lines) Textual TUIs — BaseNotesApp (shared) + MyDocBotApp
 │                            (read/write) + ReadOnlyApp, both extending BaseNotesApp
 ├── core/
 │   ├── __init__.py          Re-exports with __all__
@@ -417,7 +418,7 @@ Note body here — multiple lines preserved.
 ## Testing
 
 ```bash
-python -m pytest tests/ -v                        # All 221 tests
+python -m pytest tests/ -v                        # All 242 tests
 python -m pytest tests/test_parser.py -v          # Parser + queue + date-filter tests
 python -m pytest tests/test_tui.py -v             # Headless Textual TUI tests
 python -m pytest tests/ -k "corrupt"              # Corrupt-JSON resilience tests
@@ -439,7 +440,7 @@ bash lint.sh                                      # ruff + mypy + pytest — all
 | `test_validation.py` | `validate_doc_id`, `validate_alias`, `validate_config`, `validate_note`, `validate_history_size` |
 | `test_tui.py` | `MyDocBotApp`/`ReadOnlyApp` mounted headlessly via Textual's `run_test()`; covers `/config` (incl. the fixed dead-code bug), `/add` alias validation, read-only mount/list/current |
 
-All tests use monkeypatched Google API and temp files — no network, no OAuth. Current total: **221 passed**.
+All tests use monkeypatched Google API and temp files — no network, no OAuth. Current total: **242 passed**.
 `test_tui.py` requires `pytest-asyncio` (configured with `asyncio_mode = "auto"` in `pyproject.toml`).
 
 ---
@@ -449,7 +450,8 @@ All tests use monkeypatched Google API and temp files — no network, no OAuth. 
 - **Submit via `Ctrl+S` or button:** `Ctrl+Enter` was unreliable across terminals. The Submit button is the always-reliable fallback.
 - **Single-threaded TUI:** `@work(thread=True)` was removed; Google API calls block the UI briefly (200–500 ms), acceptable for a personal tool.
 - **Date grouping via separator items:** `DateSeparator` items carry a `_is_separator` flag; note index mapping is maintained in `_note_to_display`.
-- **Local-only tag index:** No historical backfill from Google Docs — only notes submitted in this install are indexed.
+- **Local tag index:** Notes are indexed as you write them. Older notes, notes typed directly in Google Docs, and later edits aren't picked up until you run `/tag reindex`, which re-reads the whole doc (one full-document API call).
+- **Entry boundaries:** A new note starts only at a full `[MM/DD/YY] (HH:MM)|` header at the start of a line, so a date written inside a note body (e.g. `due [07/01/26]`) doesn't split the note.
 - **`#tag` regex:** `#(\w+)` matches word characters only — `#project-alpha` → tag `project`. Use underscores: `#project_alpha`.
 - **Notes cache:** 500-entry cap, newest-first. Loaded from the API on startup (`history_size` most recent, default 20) and on each `/switch`; `/refresh` re-fetches, `/more` loads older entries.
 - **Offline queue:** `pending_queue.json` is deleted when empty. The queue is flushed (all docs, oldest first) *before* each new note, because every write is a prepend at the top of the doc. Flushing stops per doc at the first failure, to keep order and to avoid one retry wait per queued note. Use `/flush` to retry manually.

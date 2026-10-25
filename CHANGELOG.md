@@ -7,6 +7,11 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
 ## [Unreleased]
 
 ### Added
+- **`/tag reindex`:** rebuilds the current doc's tag index from the doc
+  itself, so older notes, notes typed directly in Google Docs, and later
+  edits or deletions are reflected in `/tag` and `/export <tag>`. Other
+  docs' tags are kept, and the previous index is saved as
+  `tags_index.json.bak`. Available in the CLI and the read/write TUI.
 - **Quick capture:** `mydocbot "note #tag"` writes one note to the default
   doc and exits, with no REPL. `-d <alias>` picks another doc, and text piped
   on stdin works too (`echo note | mydocbot -d work`). Same validation,
@@ -56,6 +61,10 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   changes; `tests/test_tui.py` passes unmodified.
 
 ### Fixed
+- **Dates inside notes split them:** a note whose text contained a date
+  like `[07/01/26]` was cut off there when read back from the doc (losing
+  the rest of the note and any `#tags` after it). A new note now only starts
+  at a full `[MM/DD/YY] (HH:MM)|` header at the start of a line.
 - **Expired or revoked Google sign-in:** if the saved sign-in can't be
   refreshed (access revoked, or a token Google expired), MyDocBot now deletes
   `token.json` and opens the browser sign-in again instead of crashing. A

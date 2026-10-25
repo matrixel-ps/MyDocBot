@@ -1,8 +1,10 @@
 import json
 import os
 import re
+import shutil
 import sys
 import textwrap
+from dataclasses import dataclass
 
 from . import google_docs
 from .paths import data_path
@@ -35,16 +37,64 @@ def save_tags_index(index):
         f.write('\n')
 
 
-def index_note(text, timestamp, doc_id, preview):
-    tags = extract_tags(text)
-    if not tags:
-        return
-    index = load_tags_index()
-    for tag in tags:
+def _add_note_tags(index, text, timestamp, doc_id, preview):
+    """Add one entry per #tag in text to index (in place), skipping exact duplicates."""
+    for tag in extract_tags(text):
         entry = {"ts": timestamp, "doc_id": doc_id, "preview": textwrap.shorten(preview, width=80, placeholder="...")}
         if entry not in index.setdefault(tag, []):
             index[tag].append(entry)
+
+
+def index_note(text, timestamp, doc_id, preview):
+    if not extract_tags(text):
+        return
+    index = load_tags_index()
+    _add_note_tags(index, text, timestamp, doc_id, preview)
     save_tags_index(index)
+
+
+def _count_doc_entries(index, doc_id):
+    return sum(1 for entries in index.values() for e in entries if e["doc_id"] == doc_id)
+
+
+@dataclass
+class ReindexResult:
+    status: str  # "reindexed" or "no_notes" (doc parsed to zero notes; index left unchanged)
+    notes: int = 0
+    tagged_notes: int = 0
+    tags: int = 0
+    entries_before: int = 0
+    entries_after: int = 0
+
+
+def reindex_doc(service, doc_id):
+    """Rebuild doc_id's tag entries from the doc's full text; other docs' entries are kept.
+
+    Replaces rather than merges, so notes deleted or edited in Google Docs are
+    reflected. The previous index is copied to tags_index.json.bak first. A
+    fetch error propagates before anything is touched. If the doc parses to
+    zero notes the index is left alone, so an unexpected format or empty
+    response can't wipe this doc's tags.
+    """
+    doc = google_docs.fetch_doc(service, doc_id)
+    entries = google_docs.parse_entries(doc, count=None)
+    index = load_tags_index()
+    before = _count_doc_entries(index, doc_id)
+    if not entries:
+        return ReindexResult("no_notes", entries_before=before, entries_after=before)
+
+    if os.path.exists(TAGS_INDEX_PATH):
+        shutil.copy2(TAGS_INDEX_PATH, TAGS_INDEX_PATH + '.bak')
+    index = {tag: [e for e in tag_entries if e["doc_id"] != doc_id] for tag, tag_entries in index.items()}
+    tagged = 0
+    for timestamp, body in reversed(entries):  # the doc is newest first; the index is oldest first
+        if extract_tags(body):
+            tagged += 1
+            _add_note_tags(index, body, timestamp, doc_id, body)
+    index = {tag: tag_entries for tag, tag_entries in index.items() if tag_entries}
+    save_tags_index(index)
+    doc_tags = sum(1 for tag_entries in index.values() if any(e["doc_id"] == doc_id for e in tag_entries))
+    return ReindexResult("reindexed", len(entries), tagged, doc_tags, before, _count_doc_entries(index, doc_id))
 
 
 def search_cache(cache, doc_id, keyword):

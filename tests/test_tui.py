@@ -172,3 +172,27 @@ async def test_submit_note_rejected_keeps_input(tmp_config_path, sample_config, 
         app.submit_note()
         assert service.calls == []
         assert app.query_one("#input-bar").text != ""
+
+
+@pytest.mark.asyncio
+async def test_tag_reindex_updates_status_and_tags(write_app, monkeypatch):
+    from core.parser import ReindexResult
+    monkeypatch.setattr(prs, 'reindex_doc', lambda service, doc_id: ReindexResult("reindexed", 5, 2, 3, 1, 4))
+    monkeypatch.setattr(prs, 'load_tags_index', lambda: {"fresh": []})
+    async with write_app.run_test():
+        with patch.object(write_app, 'update_status') as status:
+            write_app.handle_command('/tag reindex')
+        assert "Reindexed" in status.call_args.args[0]
+        assert "5 notes, 2 tagged, 3 tags" in status.call_args.args[0]
+        assert write_app.all_tags == {"fresh": []}
+
+
+@pytest.mark.asyncio
+async def test_tag_reindex_failure_shows_error(write_app, monkeypatch):
+    def fail(service, doc_id):
+        raise ConnectionError("offline")
+    monkeypatch.setattr(prs, 'reindex_doc', fail)
+    async with write_app.run_test():
+        with patch.object(write_app, 'show_error') as error:
+            write_app.handle_command('/tag reindex')
+        assert "Reindex failed" in error.call_args.args[0]
