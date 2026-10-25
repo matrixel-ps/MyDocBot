@@ -204,6 +204,9 @@ class BaseNotesApp(App):
         self._last_selected_index = 0
         self._note_to_display = {}
         self._api_busy = None  # label of the Google call in flight, e.g. "saving note"
+        # Every entry from the last whole-doc fetch, newest first, per doc_id (A5).
+        # /more pages through it without another download; own writes drop it.
+        self._doc_entries = {}
 
     # ---- hooks subclasses must implement ----
     def _load_config(self):
@@ -215,9 +218,18 @@ class BaseNotesApp(App):
     def _resolve_alias(self, cfg, alias):
         raise NotImplementedError
 
-    def _fetch_recent(self, doc_id, count):
-        """Fetch up to `count` most-recent (ts, body) entries for doc_id."""
+    def _parse(self, doc, count):
+        """Parse up to `count` (None = all) newest (ts, body) entries from a fetched doc."""
         raise NotImplementedError
+
+    def _fetch_recent(self, doc_id, count):
+        """Worker-side: up to `count` (None = all) newest entries, one masked, retried fetch."""
+        return self._parse(google_docs.fetch_doc(self._service, doc_id), count)
+
+    def _fetch_title_and_all(self, doc_id):
+        """Worker-side: (title, every entry newest first) from one masked fetch (A5)."""
+        doc = google_docs.fetch_doc(self._service, doc_id)
+        return doc.get('title'), self._parse(doc, None)
 
     def _date_key(self, ts):
         """Return a canonical 'MM/DD/YY' string for grouping/labeling a note's
@@ -265,10 +277,11 @@ class BaseNotesApp(App):
         count = self._history_size
 
         def done(loaded):
-            title, recent = loaded
+            title, entries = loaded
             if title:
                 self.current_title = title
-            for ts, body in reversed(recent):
+            self._doc_entries[doc_id] = entries
+            for ts, body in reversed(entries[:count]):
                 self._add_to_cache(ts, body, doc_id)
             self.refresh_ui()
 
@@ -277,12 +290,8 @@ class BaseNotesApp(App):
             self.refresh_ui()
             self.show_error(f"Startup error: {e}")
 
-        self.run_api("loading notes", lambda: self._fetch_title_and_recent(doc_id, count), done, failed)
+        self.run_api("loading notes", lambda: self._fetch_title_and_all(doc_id), done, failed)
         self.refresh_ui()
-
-    def _fetch_title_and_recent(self, doc_id, count):
-        """Worker-side: the doc's title and its `count` most recent entries."""
-        return google_docs.fetch_doc_title(self._service, doc_id), self._fetch_recent(doc_id, count)
 
     # ---- background Google calls (A3) ----
     def run_api(self, label, work, on_done, on_error=None):
@@ -439,18 +448,19 @@ class BaseNotesApp(App):
         count = self._history_size
 
         def done(loaded):
-            title, recent = loaded
+            title, entries = loaded
+            self._doc_entries[doc_id] = entries
             self.current_alias = alias
             self.current_doc_id = doc_id
             self.current_title = title or doc_id[:20] + "..."
             self.notes_cache = [n for n in self.notes_cache if n["doc_id"] != doc_id]
-            for ts, body in reversed(recent):
+            for ts, body in reversed(entries[:count]):
                 self._add_to_cache(ts, body, doc_id)
             self._last_selected_index = 0
             self.refresh_ui()
             self.update_status(f"Switched to '{alias}' ({title or doc_id})")
 
-        self.run_api("switching documents", lambda: self._fetch_title_and_recent(doc_id, count), done)
+        self.run_api("switching documents", lambda: self._fetch_title_and_all(doc_id), done)
 
     def cmd_list(self):
         aliases = self.svc_config.get("aliases", {})
@@ -513,6 +523,7 @@ class BaseNotesApp(App):
         doc_id = self.current_doc_id
 
         def done(entries):
+            self._doc_entries[doc_id] = entries  # a whole-doc fetch: /more can reuse it
             self._show_search_results(keyword, parser.search_entries(entries, keyword))
 
         def fallback(e):
@@ -551,10 +562,12 @@ class BaseNotesApp(App):
 
         def work():
             google_docs.invalidate_title_cache(doc_id)
-            return self._fetch_title_and_recent(doc_id, count)
+            return self._fetch_title_and_all(doc_id)
 
         def done(loaded):
-            title, recent = loaded
+            title, entries = loaded
+            self._doc_entries[doc_id] = entries
+            recent = entries[:count]
             if title:
                 self.current_title = title
             existing = {(n["ts"], n["doc_id"]) for n in self.notes_cache}
@@ -577,7 +590,8 @@ class BaseNotesApp(App):
             self.update_status("All notes loaded (cache full or end of document)")
             return
 
-        def done(recent):
+        def show(entries):
+            recent = entries[:fetch_count]
             existing = {(n["ts"], n["doc_id"]) for n in self.notes_cache}
             new_entries = [(ts, body) for ts, body in recent if (ts, doc_id) not in existing]
             if not new_entries:
@@ -590,7 +604,16 @@ class BaseNotesApp(App):
             self.refresh_ui()
             self.update_status(f"Loaded {len(new_entries)} more note(s)")
 
-        self.run_api("loading older notes", lambda: self._fetch_recent(doc_id, fetch_count), done,
+        cached = self._doc_entries.get(doc_id)
+        if cached is not None:
+            show(cached)  # the whole doc is already here: no download (A5)
+            return
+
+        def fetched(loaded):
+            self._doc_entries[doc_id] = loaded[1]
+            show(loaded[1])
+
+        self.run_api("loading older notes", lambda: self._fetch_title_and_all(doc_id), fetched,
                      lambda e: self.show_error(f"Load more failed: {e}"))
 
 
@@ -619,11 +642,8 @@ class MyDocBotApp(BaseNotesApp):
     def _resolve_alias(self, cfg, alias):
         return config.resolve_alias(cfg, alias)
 
-    def _fetch_recent(self, doc_id, count):
-        return google_docs.parse_entries(
-            google_docs.fetch_doc(self._service, doc_id),  # with retry (B10)
-            count=count
-        )
+    def _parse(self, doc, count):
+        return google_docs.parse_entries(doc, count=count)
 
     def _date_key(self, ts):
         # "[MM/DD/YY] (HH:MM)|..." -> "MM/DD/YY", the key `_format_date_header` expects.
@@ -684,6 +704,7 @@ class MyDocBotApp(BaseNotesApp):
         if result.status == "rejected":
             self.update_status(f"Note rejected: {result.reason}")
             return False
+        self._doc_entries.clear()  # docs may have changed; the next /more refetches
         self._add_flushed_to_cache(result.flushed)
         if result.status == "sent":
             self._add_to_cache(result.timestamp, text, self.current_doc_id)
@@ -760,6 +781,7 @@ class MyDocBotApp(BaseNotesApp):
     def cmd_flush(self):
         def done(sent):
             if sent:
+                self._doc_entries.clear()  # docs changed; the next /more refetches
                 self._add_flushed_to_cache(sent)
                 self.refresh_ui()
             pending = parser.count_pending()
@@ -1133,11 +1155,8 @@ class ReadOnlyApp(BaseNotesApp):
     def _resolve_alias(self, cfg, alias):
         return config.resolve_read_alias(cfg, alias)
 
-    def _fetch_recent(self, doc_id, count):
-        return google_docs.parse_entries_readable(
-            google_docs.fetch_doc(self._service, doc_id),  # with retry (B10)
-            count=count
-        )
+    def _parse(self, doc, count):
+        return google_docs.parse_entries_readable(doc, count=count)
 
     def _date_key(self, ts):
         # Read timestamps look like "[DD/MM/YYYY] [H.M]|...". Rebuild the

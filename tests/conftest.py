@@ -98,7 +98,7 @@ def mock_service(monkeypatch):
         def documents(self):
             return self
 
-        def get(self, documentId=None):
+        def get(self, documentId=None, fields=None):
             return self
 
         def batchUpdate(self, documentId=None, body=None):
@@ -123,7 +123,7 @@ class RecordingService:
     def documents(self):
         return self
 
-    def get(self, documentId=None):
+    def get(self, documentId=None, fields=None):
         self._pending = None
         return self
 

@@ -277,14 +277,16 @@ class BlockingService:
         self.active = 0
         self.max_active = 0
         self.calls = []
+        self.fields = []  # the `fields` mask of each documents().get()
         self._doc = make_doc_response(doc_text)
         self._kind = ("get", None)
 
     def documents(self):
         return self
 
-    def get(self, documentId=None):
+    def get(self, documentId=None, fields=None):
         self._kind = ("get", documentId)
+        self.fields.append(fields)
         return self
 
     def batchUpdate(self, documentId=None, body=None):
@@ -399,7 +401,8 @@ async def test_unexpected_submit_error_keeps_text(tmp_config_path, sample_config
 @pytest.mark.asyncio
 async def test_startup_error_is_shown_not_overwritten(tmp_config_path, sample_config, tmp_tags_index_path,
                                                       tmp_pending_path, monkeypatch):
-    monkeypatch.setattr(MyDocBotApp, '_fetch_recent', lambda self, doc_id, count: (_ for _ in ()).throw(OSError("dns")))
+    # A5: startup loads title + notes with one call, `_fetch_title_and_all` (was `_fetch_recent`).
+    monkeypatch.setattr(MyDocBotApp, '_fetch_title_and_all', lambda self, doc_id: (_ for _ in ()).throw(OSError("dns")))
     app = _blocking_app(sample_config, BlockingService())
     async with mounted(app):
         assert "Startup error: dns" in str(app.query_one("#status-bar").render())
@@ -686,3 +689,80 @@ async def test_read_only_list_labels_today_and_yesterday(tmp_read_config_path, m
         app = ReadOnlyApp()
     async with mounted(app):
         assert _separator_labels(app) == ["Today", "Yesterday", "10/01/26"]
+
+
+# ---------------------------------------------------------------------------
+# One masked fetch per load; /more pages through a session cache (A5)
+# ---------------------------------------------------------------------------
+
+MANY_NOTES = "\n".join(f"[{(d // 28) + 1:02d}/{(d % 28) + 1:02d}/26] (10:00)| note {d}" for d in range(59, -1, -1))
+
+
+def _gets(service):
+    return sum(1 for kind, _ in service.calls if kind == "get")
+
+
+@pytest.mark.asyncio
+async def test_startup_switch_refresh_make_one_masked_fetch_each(tmp_config_path, sample_config, tmp_tags_index_path,
+                                                                 tmp_pending_path):
+    google_docs.invalidate_title_cache()
+    service = BlockingService(doc_text=MANY_NOTES)
+    app = _blocking_app(sample_config, service)
+    async with mounted(app) as pilot:
+        assert _gets(service) == 1                       # title + notes in one call (was 2)
+        app.handle_command('/switch work')
+        await settle(app, pilot)
+        assert _gets(service) == 2
+        app.handle_command('/refresh')
+        await settle(app, pilot)
+        assert _gets(service) == 3
+    assert set(service.fields) == {google_docs.CONTENT_FIELDS}
+
+
+@pytest.mark.asyncio
+async def test_more_pages_through_the_cache_without_fetching(tmp_config_path, sample_config, tmp_tags_index_path,
+                                                             tmp_pending_path):
+    service = BlockingService(doc_text=MANY_NOTES)
+    app = _blocking_app(sample_config, service)
+    async with mounted(app) as pilot:
+        before = _gets(service)
+        loaded = []
+        for _ in range(3):
+            app.handle_command('/more')
+            await settle(app, pilot)
+            loaded.append(sum(1 for n in app.notes_cache if n["doc_id"] == app.current_doc_id))
+        assert _gets(service) == before                  # no API call at all
+        assert loaded == [40, 60, 60]
+        assert "No more notes to load" in str(app.query_one("#status-bar").render())
+        texts = [n["text"] for n in app.notes_cache]
+        assert texts == [f"note {d}" for d in range(59, -1, -1)]   # same order as the doc
+
+
+@pytest.mark.asyncio
+async def test_own_writes_drop_the_cache(tmp_config_path, sample_config, tmp_tags_index_path, tmp_pending_path):
+    service = BlockingService(doc_text=MANY_NOTES)
+    app = _blocking_app(sample_config, service)
+    async with mounted(app) as pilot:
+        app.query_one("#input-bar").text = "fresh note"
+        app.submit_note()
+        await settle(app, pilot)
+        before = _gets(service)
+        app.handle_command('/more')
+        await settle(app, pilot)
+        assert _gets(service) == before + 1              # refetched: the doc changed
+
+
+@pytest.mark.asyncio
+async def test_list_fetches_titles_with_title_mask(tmp_config_path, sample_config, tmp_tags_index_path,
+                                                   tmp_pending_path):
+    google_docs.invalidate_title_cache()
+    service = BlockingService(doc_text=MANY_NOTES)
+    service._doc["title"] = "My Log"
+    app = _blocking_app(sample_config, service)
+    async with mounted(app) as pilot:
+        assert app.current_title == "My Log"           # title came with the notes, one call
+        service.fields.clear()
+        app.handle_command('/list')
+        await settle(app, pilot)
+    # the startup fetch cached log's title; the other two aliases need a title-only fetch
+    assert service.fields == [google_docs.TITLE_FIELDS, google_docs.TITLE_FIELDS]

@@ -130,18 +130,30 @@ def _api_call_with_retry(fn, max_retries=3):
             raise
 
 
-def fetch_doc(service, doc_id):
-    """The full document body, with retry. Raises on failure."""
-    return _api_call_with_retry(
-        lambda: service.documents().get(documentId=doc_id).execute()
+# Partial-response masks (A5). The Docs API can't page a document's content
+# (documents.get has no range parameter), but `fields` drops everything the
+# parsers never read: styles, layout, lists, inline objects. CONTENT_FIELDS is
+# exactly what _doc_text() walks, plus the title so one call serves both.
+TITLE_FIELDS = "title"
+CONTENT_FIELDS = "title,body/content/paragraph/elements/textRun/content"
+
+
+def fetch_doc(service, doc_id, fields=CONTENT_FIELDS):
+    """The document (title + text only, by default), with retry. Raises on failure.
+    A fetch that includes the title also refreshes the title cache."""
+    doc = _api_call_with_retry(
+        lambda: service.documents().get(documentId=doc_id, fields=fields).execute()
     )
+    if 'title' in doc:
+        _TITLE_CACHE[doc_id] = doc['title']
+    return doc
 
 
 def fetch_doc_title(service, doc_id, use_cache=True):
     if use_cache and doc_id in _TITLE_CACHE:
         return _TITLE_CACHE[doc_id]
     try:
-        doc = fetch_doc(service, doc_id)
+        doc = fetch_doc(service, doc_id, fields=TITLE_FIELDS)
         title = doc.get('title', '(untitled)')
         _TITLE_CACHE[doc_id] = title
         return title
