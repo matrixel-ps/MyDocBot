@@ -6,7 +6,17 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
 
 ## [Unreleased]
 
+### Added
+- **`docs_config.example.json`:** a template config with a placeholder doc ID.
+  Copy it to `docs_config.json`, or keep using `python main.py --add`.
+
 ### Changed
+- **Personal data is no longer tracked in git:** `docs_config.json`,
+  `read_config.json`, `tags_index.json`, and `pending_queue.json` are now
+  gitignored, and `docs_config.json` and `tags_index.json` were removed from
+  the repo (your local copies are kept). Other clones lose those two files
+  from disk when they pull this change, so back them up there first. README
+  examples now use a placeholder doc ID.
 - **Offline queue:** a successful write in the TUI now retries queued notes
   for *all* documents, like the CLI and `/flush` already did. Retrying stops
   at the first failure for each document, so being offline costs one retry

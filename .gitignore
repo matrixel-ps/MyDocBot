@@ -7,3 +7,10 @@ credentials.json
 token.json
 venv/
 .claude/settings.local.json
+
+# Personal data (real doc IDs and note text). Copy docs_config.example.json
+# to docs_config.json, or run `python main.py --add <alias> <doc_id>`.
+docs_config.json
+read_config.json
+tags_index.json
+pending_queue.json
