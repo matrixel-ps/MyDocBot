@@ -15,6 +15,7 @@ from googleapiclient.errors import HttpError
 from httplib2 import HttpLib2Error, ServerNotFoundError
 
 from .paths import data_path
+from .timestamps import HEADER_PATTERN
 
 SCOPES = ['https://www.googleapis.com/auth/documents']
 
@@ -270,15 +271,15 @@ def parse_entries(doc, count=2):
     text = ''.join(full_text)
     # Only a full "[MM/DD/YY] (HH:MM)|" header at the start of a line begins a
     # new entry, so a date written inside a note body doesn't split it (B5).
-    parts = re.split(r'^(?=\[\d{2}/\d{2}/\d{2}\]\s*\(\d{2}:\d{2}\)\|)', text, flags=re.MULTILINE)
+    parts = re.split(f'^(?={HEADER_PATTERN})', text, flags=re.MULTILINE)
     entries = []
     for part in parts:
         part = part.strip()
         if not part:
             continue
-        m = re.match(r'(\[\d{2}/\d{2}/\d{2}\]\s*\(\d{2}:\d{2}\)\|)', part)
+        m = re.match(HEADER_PATTERN, part)
         if m:
-            ts = m.group(1)
+            ts = m.group(0)
             body = part[len(ts):].strip()
             entries.append((ts, body))
     return entries[:count]

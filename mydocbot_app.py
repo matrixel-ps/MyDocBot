@@ -12,7 +12,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal
 from textual.widgets import Button, Label, ListItem, ListView, RichLog, Static, TextArea
 
-from core import config, google_docs, notes, parser, validation
+from core import config, google_docs, notes, parser, timestamps, validation
 from core.commands import (
     QUEUE_USAGE,
     TAG_USAGE,
@@ -626,9 +626,8 @@ class MyDocBotApp(BaseNotesApp):
         )
 
     def _date_key(self, ts):
-        # Write timestamps look like "[MM/DD/YY] (HH:MM)|...", so chars 1-8 are
-        # already the "MM/DD/YY" key expected by `_format_date_header`.
-        return ts[1:9]
+        # "[MM/DD/YY] (HH:MM)|..." -> "MM/DD/YY", the key `_format_date_header` expects.
+        return timestamps.date_key(ts)
 
     def compose(self) -> ComposeResult:
         yield Static("Connecting...", id="header-bar")

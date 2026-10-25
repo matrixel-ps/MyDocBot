@@ -94,6 +94,9 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   changes; `tests/test_tui.py` passes unmodified.
 
 ### Fixed
+- **`/tag search … --since` / `--until` with a 4-digit year:** a date
+  like `06/01/2026` was compared wrongly, so `--since 06/01/2026` returned
+  nothing. Both `MM/DD/YY` and `MM/DD/YYYY` now work.
 - **TUI crash on brackets in commands:** typing something like
   `/switch [/]` crashed the TUI, and `[b]` in an alias, tag, or search
   disappeared from the status bar. Status messages now always show your

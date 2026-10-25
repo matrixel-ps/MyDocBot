@@ -1,9 +1,7 @@
 from dataclasses import dataclass, field
-from datetime import datetime
 
 from . import google_docs, parser, validation
-
-TIMESTAMP_FORMAT = "[%m/%d/%y] (%H:%M)|"
+from .timestamps import TIMESTAMP_FORMAT, format_timestamp  # noqa: F401  re-exported; defined in timestamps (A1)
 
 
 @dataclass
@@ -21,10 +19,6 @@ class SubmitResult:
     flushed: list[dict] = field(default_factory=list)
     queued_behind: int = 0
     failure: google_docs.WriteFailure | None = None
-
-
-def format_timestamp(now=None):
-    return (now or datetime.now()).strftime(TIMESTAMP_FORMAT)
 
 
 def submit_note(service, doc_id, text, now=None):

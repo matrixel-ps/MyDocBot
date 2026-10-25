@@ -47,6 +47,7 @@ timestamp format (see `parse_entries_readable()` below).
 | `parser.py` | Tags, search, offline queue, date filters | `extract_tags()`, `index_note()`, `search_cache()`, `queue_note()`, `count_pending()`, `flush_pending_notes()`, `parse_date_flags()`, `filter_tag_entries_by_date()` |
 | `validation.py` | Input guards | `validate_doc_id()`, `validate_alias()`, `validate_config()`, `validate_note()`, `validate_history_size()` |
 | `notes.py` | The single note write path (CLI + TUI) | `submit_note()` → `SubmitResult`, `format_timestamp()` |
+| `timestamps.py` | The note timestamp format `[MM/DD/YY] (HH:MM)\|`, in one place | `format_timestamp()`, `parse_timestamp()`, `date_key()`, `parse_date_flag()`, `HEADER_PATTERN` |
 | `paths.py` | Where personal data lives, first-run migration | `resolve_data_dir()`, `data_path()`, `prepare_data_dir()` |
 | `commands.py` | CLI command handlers | `dispatch()`, all `cmd_*()` functions, `resolve_editor()`, `open_editor()`, `export_to_markdown()` |
 
@@ -394,6 +395,7 @@ Note body here — multiple lines preserved.
 │   ├── config.py            Alias CRUD for write + read-only configs, history_size, 0600 perms
 │   ├── google_docs.py       OAuth, prepend_text→bool, retry, parse_entries(+readable), title cache
 │   ├── notes.py             submit_note() — the single write path (validate, flush, prepend, index, queue)
+│   ├── timestamps.py        Timestamp format: format/parse, date key, --since/--until parsing
 │   ├── parser.py            Tags, search_cache, offline queue, date filters
 │   ├── paths.py             Data directory ($MYDOCBOT_HOME / XDG / ~/.config/mydocbot), first-run migration
 │   └── validation.py        validate_doc_id, validate_alias, validate_config, validate_note, validate_history_size
@@ -402,6 +404,7 @@ Note body here — multiple lines preserved.
 │   ├── test_main.py          main() REPL loop, --add flag, pending count display, one-shot capture
 │   ├── test_paths.py         Data-dir resolution and one-time migration
 │   ├── test_notes.py         submit_note(): sent/queued/rejected, offline-queue order
+│   ├── test_timestamps.py    Timestamp format/parse round trip, date flags, header pattern
 │   ├── test_google_docs.py   get_service() sign-in: refresh, revoked/corrupt token, offline
 │   ├── test_config.py        Config CRUD + corrupt JSON fallback (write & read)
 │   ├── test_parser.py        Tags, parse_entries, retry, search, corrupt JSON, malformed ts
@@ -438,6 +441,7 @@ bash lint.sh                                      # ruff + mypy + pytest — all
 | `test_paths.py` | Data-dir precedence, `0700` creation, one-time copy-only migration (never into an existing dir) |
 | `test_config.py` | Load, save, resolve, corrupt JSON fallback + warning (write & read-only config) |
 | `test_notes.py` | `submit_note()`: sent / queued / rejected, queued notes written first and in order, queue-behind, all-docs flush |
+| `test_timestamps.py` | `format_timestamp`/`parse_timestamp` round trip, invalid timestamps, `date_key`, `parse_date_flag` (2- and 4-digit years), `HEADER_PATTERN` |
 | `test_google_docs.py` | `get_service()`: valid/refreshed token, revoked or corrupt token re-runs sign-in, offline startup exits and keeps the token |
 | `test_parser.py` | Tag CRUD, parse_entries, prepend_text retry, search_cache, date filters, corrupt JSON, malformed timestamps |
 | `test_commands.py` | All CLI commands: switch, list, add, remove, rename, current, tag, search, export, config, help |
