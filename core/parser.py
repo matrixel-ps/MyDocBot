@@ -13,8 +13,14 @@ TAGS_INDEX_PATH = data_path('tags_index.json')
 PENDING_PATH = data_path('pending_queue.json')
 
 
+# A tag is "#" + word characters, with single hyphens allowed *between* them:
+# #project-alpha, #a_b-c. A trailing hyphen isn't part of it (#done- -> done) and
+# a hyphen can't start one (#-x). Shared with the TUI highlighter (F5).
+TAG_PATTERN = r'#(\w+(?:-\w+)*)'
+
+
 def extract_tags(text):
-    return re.findall(r'#(\w+)', text.lower())
+    return re.findall(TAG_PATTERN, text.lower())
 
 
 def load_tags_index():

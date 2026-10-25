@@ -28,6 +28,9 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   Copy it to `docs_config.json`, or keep using `python main.py --add`.
 
 ### Changed
+- **Hyphenated tags:** `#project-alpha` is now the tag `project-alpha`
+  (it used to be cut to `project`), in the index, `/tag`, `/export`, and
+  TUI highlighting. Run `/tag reindex` to re-tag older notes.
 - **Dependencies:** `requirements.txt` now holds only runtime packages,
   with Textual and rich pinned to the tested versions. Test and lint tools
   (pytest, pytest-asyncio, ruff, mypy) moved to a new, pinned
