@@ -31,6 +31,12 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   changes; `tests/test_tui.py` passes unmodified.
 
 ### Fixed
+- **Expired or revoked Google sign-in:** if the saved sign-in can't be
+  refreshed (access revoked, or a token Google expired), MyDocBot now deletes
+  `token.json` and opens the browser sign-in again instead of crashing. A
+  corrupt `token.json` is handled the same way. Starting while offline now
+  exits with a "couldn't reach Google" message and keeps your sign-in,
+  instead of showing a traceback.
 - **Offline notes out of order:** notes written while offline used to land
   *above* the newer note that triggered the retry. Queued notes are now
   written first, oldest first, so the doc stays in the order you wrote

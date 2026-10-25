@@ -25,18 +25,15 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 ## Suggested order
 
-1. **B4:** handle expired or revoked OAuth tokens.
-2. **P1:** stop tracking personal data files (lower urgency since the repo is
+1. **P1:** stop tracking personal data files (lower urgency since the repo is
    private; do it before F2, which moves those files anyway).
-3. **F1 + F2:** one-line capture and installing as a command. F1 can call
-   `core.notes.submit_note()` directly.
-4. **F4:** `/tag reindex`.
+2. **F1 + F2:** one-line capture and installing as a command.
+3. **F4:** `/tag reindex`.
 
 ## Bugs
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
-| B4 | **Expired/revoked OAuth token crashes the app** | open | high | S | core/google_docs.py `get_service()` | `creds.refresh(Request())` doesn't handle `RefreshError`. Delete `token.json` and restart the browser sign-in instead of showing a traceback. |
 | B5 | **Note bodies containing a date get split** | open | med | S | core/google_docs.py `parse_entries()` | Splits on any `[MM/DD/YY]`, so a body containing e.g. `[01/02/03]` becomes two entries. Anchor the split on the full `[..] (HH:MM)\|` header at line start. |
 | B6 | **No regression test for read-only "Today" label** | open | low | XS | tests/test_tui.py | Flagged in design decision #27: add a targeted test for `_date_key()` / `_format_date_header()`. |
 | B7 | **User input not escaped in TUI status messages** | open | low | XS | mydocbot_app.py `update_status()` callers, e.g. :370, :763, :822 | Aliases, tags, and validation messages are interpolated into Rich markup unescaped (`show_error()` already escapes). Input containing `[...]` can be swallowed or mis-styled. Carried over from CHANGELOG "Not Yet Done". |
@@ -59,7 +56,7 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 | F3 | **`/undo` last note** | open | low | M | core/google_docs.py, commands, TUI | Remove the range MyDocBot just wrote at the top of the doc, but only if the top entry still matches what was written. |
 | F4 | **`/tag reindex`** | open | med | M | core/parser.py, commands | Rebuild `tags_index.json` from the doc via `parse_entries()`. Removes the "no historical backfill" limitation (design decision #6) and repairs damage from B2. |
 | F5 | **Hyphenated tags** | open | low | XS | core/parser.py `extract_tags()` | Allow `#project-alpha` with a regex like `#([\w-]+)` (strip a trailing `-`). Today it silently becomes `#project`. Update design decision #9 and the README. |
-| F6 | **Permanent vs. transient write failures; `/queue` command** | open | med | M | core/google_docs.py `prepend_text()`, core/parser.py, commands, TUI | A bad `doc_id` or revoked permission (403/404) is queued like an offline failure and retried forever with no explanation. Don't retry permanent errors, store the last error with each queued entry, and add `/queue` to list or drop entries. Since 2026-10-23 a doc whose queued note keeps failing also keeps its *new* notes queued behind it (by design, to keep order), so this matters more. |
+| F6 | **Permanent vs. transient write failures; `/queue` command** | open | med | M | core/google_docs.py `prepend_text()`, core/parser.py, commands, TUI | A bad `doc_id` or revoked permission (403/404) is queued like an offline failure and retried forever with no explanation. Don't retry permanent errors, store the last error with each queued entry, and add `/queue` to list or drop entries. Since 2026-10-23 a doc whose queued note keeps failing also keeps its *new* notes queued behind it (by design, to keep order), so this matters more. A sign-in revoked *mid-session* also lands here: the token refresh fails inside the write, `prepend_text()` catches the `RefreshError`, and the note is queued with no hint to restart (startup is handled since B4, 2026-10-24). |
 | F7 | **Configurable note formats per alias** | open | low | L | core/google_docs.py, core/config.py | Replace the two hard-coded parsers with a format setting per alias, so the read-only TUI can browse other doc layouts without new code. |
 | F8 | **Tag autocomplete in TUI** | open | low | M | mydocbot_app.py | Suggest known tags from `tags_index.json` when the user types `#` in the read/write TUI input (`on_text_area_changed`). |
 | F9 | **Multi-doc tag aggregation** | open | low | S | core/commands.py `cmd_tag_*`, mydocbot_app.py | An `--all` flag for `/tag` commands to aggregate across all configured docs, not just the active one. |
