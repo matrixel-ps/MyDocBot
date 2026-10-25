@@ -231,21 +231,23 @@ Type a note over one or more lines; a **blank line submits**. `exit` or
 ```
 ┌──────────────────────────────────────────────────────────────┐
 │  MyDocBot          [log] "My Doc"               ● Connected  │
-├─────────────────────────────┬────────────────────────────────┤
-│  ─── Today ───              │  [06/18/26] (14:30)|           │
-│  [14:30] Meeting #project   │  Met with team about the       │
-│  [13:00] Bug fix #bug       │  sprint. #project #meeting     │
-│  ─── Yesterday ───          │                                │
-│  [10:15] Research spike     │                                │
-├─────────────────────────────┴────────────────────────────────┤
+├──────────────────────┬───────────────────────────────────────┤
+│  ─── Today ───       │  [06/18/26] (14:30)|                  │
+│  06/18/26  14:30     │                                       │
+│  06/18/26  13:00     │  Met with team about the sprint.      │
+│  ─── Yesterday ───   │  #project #meeting                    │
+│  06/17/26  10:15     │                                       │
+├──────────────────────┴───────────────────────────────────────┤
 │  Type a note... (Ctrl+S to submit)              [ Submit ]   │
 ├──────────────────────────────────────────────────────────────┤
 │  Ready                                                       │
 └──────────────────────────────────────────────────────────────┘
 ```
 
-Notes are grouped under Today, Yesterday, or a date. The list shows up to
-three `#tags` per note, and the preview highlights them.
+Notes are grouped under Today, Yesterday, or a date. The list shows only
+each note's date and time; the note itself is in the preview, which
+highlights its `#tags`, wraps to the window width, and re-wraps when you
+resize the terminal.
 
 | Key | Read/write TUI | Read-only TUI |
 |---|---|---|

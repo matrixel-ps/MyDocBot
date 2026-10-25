@@ -2,15 +2,14 @@ import os
 import re
 import subprocess
 import tempfile
-import textwrap
 from datetime import datetime, timedelta
 
 from rich.markup import escape as md_escape
 from rich.text import Text
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Horizontal
-from textual.widgets import Button, Label, ListItem, ListView, RichLog, Static, TextArea
+from textual.containers import Horizontal, VerticalScroll
+from textual.widgets import Button, Label, ListItem, ListView, Static, TextArea
 
 from core import config, google_docs, notes, parser, timestamps, validation
 from core.commands import (
@@ -46,7 +45,7 @@ Screen {
 }
 
 #notes-list {
-    width: 40%;
+    width: 24;
     border: solid #45475a;
     background: #181825;
 }
@@ -56,11 +55,12 @@ Screen {
 }
 
 #preview-pane {
-    width: 60%;
+    width: 1fr;
     border: solid #45475a;
     background: #181825;
     padding: 1 2;
     overflow-y: auto;
+    overflow-x: hidden;
 }
 
 #input-area {
@@ -120,17 +120,12 @@ Screen {
 
 
 class NoteItem(ListItem):
-    def __init__(self, timestamp, text, doc_id):
-        preview = textwrap.shorten(text, width=80, placeholder="...").replace('\n', ' ')
-        time_part = timestamp[12:17] if len(timestamp) >= 17 else timestamp
-        tags = parser.extract_tags(text)
-        tag_str = f"  [#a6e3a1]{' '.join(f'#{t}' for t in tags[:3])}[/]" if tags else ""
-        label = Label(f"[{md_escape(time_part)}] {md_escape(preview)}{tag_str}")
-        super().__init__(label)
+    def __init__(self, timestamp, text, doc_id, label_text):
+        super().__init__(Label(label_text))
         self.note_ts = timestamp
         self.note_text = text
         self.note_doc_id = doc_id
-        self.tags = tags
+        self.tags = parser.extract_tags(text)
 
 
 class DateSeparator(ListItem):
@@ -141,25 +136,28 @@ class DateSeparator(ListItem):
         self._is_separator = True
 
 
-class PreviewPane(RichLog):
-    def _on_key(self, event):
-        key = event.key
-        if key == "up":
-            self.scroll_up(animate=False)
-        elif key == "down":
-            self.scroll_down(animate=False)
-        elif key == "pageup":
-            self.scroll_page_up(animate=False)
-        elif key == "pagedown":
-            self.scroll_page_down(animate=False)
-        elif key == "home":
-            self.scroll_home(animate=False)
-        elif key == "end":
-            self.scroll_end(animate=False)
-        else:
-            super()._on_key(event)
-            return
-        event.stop()
+class WrappingPreview(VerticalScroll):
+    """Preview pane that re-wraps its text to the pane width on every resize.
+
+    It replaced a RichLog, which wraps once, at write time, and never narrower
+    than its min_width (78), so a narrow pane scrolled sideways. It keeps
+    RichLog's write/clear/scroll_home calls, so the commands didn't change."""
+
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self._parts = []
+        self._body = Static("", markup=True)
+
+    def compose(self) -> ComposeResult:
+        yield self._body
+
+    def write(self, text):
+        self._parts.append(text)
+        self._body.update("\n".join(self._parts))
+
+    def clear(self):
+        self._parts = []
+        self._body.update("")
 
 
 class BaseNotesApp(App):
@@ -235,6 +233,11 @@ class BaseNotesApp(App):
         """Return a canonical 'MM/DD/YY' string for grouping/labeling a note's
         timestamp, comparable against `_format_date_header`'s own
         `datetime.now().strftime("%m/%d/%y")` computation."""
+        raise NotImplementedError
+
+    def _note_label(self, ts):
+        """Markup for a note's row in the list: its date and time only, since the
+        note itself is read in the preview."""
         raise NotImplementedError
 
     def _resolve_initial_alias(self, aliases):
@@ -372,7 +375,7 @@ class BaseNotesApp(App):
                 current_date = date_key
                 notes_list.append(DateSeparator(self._format_date_header(date_key)))
                 display_idx += 1
-            item = NoteItem(n["ts"], n["text"], n["doc_id"])
+            item = NoteItem(n["ts"], n["text"], n["doc_id"], self._note_label(n["ts"]))
             notes_list.append(item)
             self._note_to_display[note_idx] = display_idx
             note_idx += 1
@@ -649,11 +652,16 @@ class MyDocBotApp(BaseNotesApp):
         # "[MM/DD/YY] (HH:MM)|..." -> "MM/DD/YY", the key `_format_date_header` expects.
         return timestamps.date_key(ts)
 
+    def _note_label(self, ts):
+        # "06/18/26  14:30"; the note itself is in the preview.
+        date_part, time_part = timestamps.parse_timestamp(ts).strftime("%m/%d/%y %H:%M").split()
+        return f"{date_part}  [#a6e3a1]{time_part}[/]"
+
     def compose(self) -> ComposeResult:
         yield Static("Connecting...", id="header-bar")
         with Horizontal(id="main-area"):
             yield ListView(id="notes-list")
-            yield PreviewPane(id="preview-pane", max_lines=None, highlight=False, wrap=True, markup=True)
+            yield WrappingPreview(id="preview-pane")
         with Horizontal(id="input-area"):
             yield TextArea(id="input-bar", text="", placeholder="Type a note... (Ctrl+S to submit)")
             yield Button("Submit", id="submit-btn", variant="primary")
@@ -1166,6 +1174,12 @@ class ReadOnlyApp(BaseNotesApp):
         day, month, year = date_str.split("/")
         return f"{int(month):02d}/{int(day):02d}/{int(year) % 100:02d}"
 
+    def _note_label(self, ts):
+        # Date and time only ("25/10/2026  09:05"); the note itself is in the preview.
+        date_part, time_part = ts.split("] [", 1)
+        hour, minute = time_part.rstrip("]|").split(".")
+        return f"{md_escape(date_part[1:])}  [#a6e3a1]{int(hour):02d}:{int(minute):02d}[/]"
+
     def _resolve_initial_alias(self, aliases):
         if self.start_alias and self.start_alias in aliases:
             return self.start_alias
@@ -1175,7 +1189,7 @@ class ReadOnlyApp(BaseNotesApp):
         yield Static("Connecting...", id="header-bar")
         with Horizontal(id="main-area"):
             yield ListView(id="notes-list")
-            yield PreviewPane(id="preview-pane", max_lines=None, highlight=False, wrap=True, markup=True)
+            yield WrappingPreview(id="preview-pane")
         with Horizontal(id="input-area"):
             yield TextArea(id="cmd-bar", text="", placeholder="Type /command... (Ctrl+S to run)")
             yield Button("Run", id="submit-btn", variant="primary")

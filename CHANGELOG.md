@@ -46,6 +46,10 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   Copy it to `docs_config.json`, or keep using `python main.py --add`.
 
 ### Changed
+- **TUI list and preview (both TUIs):** the notes list now shows only each
+  note's date and time (no preview text or tags), and the note is read in
+  the preview pane, which now takes most of the width. Long notes wrap to the pane instead of scrolling
+  sideways, and re-wrap when you resize the terminal.
 - **Shorter README:** reorganised as a user guide (quickstart first, one
   command table showing what each interface supports, each behavior
   explained once). Developer details moved to `docs/architecture.md`.
