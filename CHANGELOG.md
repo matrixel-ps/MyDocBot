@@ -31,6 +31,9 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   Copy it to `docs_config.json`, or keep using `python main.py --add`.
 
 ### Changed
+- **Shorter README:** reorganised as a user guide (quickstart first, one
+  command table showing what each interface supports, each behavior
+  explained once). Developer details moved to `docs/architecture.md`.
 - **Faster loading, instant `/more`:** loading a doc now takes one request
   instead of two and downloads only the title and text, not the document's
   styling. `/list` fetches only titles. In the TUI, `/more` shows older

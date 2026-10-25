@@ -25,9 +25,9 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 ## Suggested order
 
-1. **D1:** shorten the README.
-2. **F3:** `/undo` last note.
-3. **A6:** file locking for simultaneous read-modify-write.
+1. **F3:** `/undo` last note.
+2. **A6:** file locking for simultaneous read-modify-write.
+3. **F9:** multi-doc tag aggregation.
 
 ## Bugs
 
@@ -59,4 +59,3 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
-| D1 | **Shorten the README** | open | low | S | README.md | Still long and history-heavy in places (e.g. "Design Decisions & Known Limitations"). Keep the user-facing parts; leave history to CHANGELOG and the agent notes. |
