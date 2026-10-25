@@ -5,10 +5,10 @@ import sys
 import textwrap
 
 from . import google_docs
+from .paths import data_path
 
-BASE_DIR = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-TAGS_INDEX_PATH = os.path.join(BASE_DIR, 'tags_index.json')
-PENDING_PATH = os.path.join(BASE_DIR, 'pending_queue.json')
+TAGS_INDEX_PATH = data_path('tags_index.json')
+PENDING_PATH = data_path('pending_queue.json')
 
 
 def extract_tags(text):

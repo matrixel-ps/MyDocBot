@@ -4,6 +4,23 @@ import tempfile
 import pytest
 
 
+@pytest.fixture(autouse=True)
+def _isolate_data_dir(tmp_path, monkeypatch):
+    """Point every personal data path into tmp_path, so no test can read or write
+    the real ~/.config/mydocbot or the old repo-root files. The tmp_*_path
+    fixtures below override individual paths on top of this."""
+    data_dir = tmp_path / 'mydocbot-data'
+    monkeypatch.setattr('core.paths.DATA_DIR', str(data_dir))
+    monkeypatch.setattr('core.paths.LEGACY_DIR', str(tmp_path / 'legacy'))
+    monkeypatch.setattr('core.config.CONFIG_PATH', str(data_dir / 'docs_config.json'))
+    monkeypatch.setattr('core.config.READ_CONFIG_PATH', str(data_dir / 'read_config.json'))
+    monkeypatch.setattr('core.parser.TAGS_INDEX_PATH', str(data_dir / 'tags_index.json'))
+    monkeypatch.setattr('core.parser.PENDING_PATH', str(data_dir / 'pending_queue.json'))
+    monkeypatch.setattr('core.google_docs.TOKEN_PATH', str(data_dir / 'token.json'))
+    monkeypatch.setattr('core.google_docs.CREDENTIALS_PATH', str(data_dir / 'credentials.json'))
+    return data_dir
+
+
 @pytest.fixture
 def sample_config():
     return {
