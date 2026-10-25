@@ -31,6 +31,12 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   Copy it to `docs_config.json`, or keep using `python main.py --add`.
 
 ### Changed
+- **Faster loading, instant `/more`:** loading a doc now takes one request
+  instead of two and downloads only the title and text, not the document's
+  styling. `/list` fetches only titles. In the TUI, `/more` shows older
+  notes instantly from the copy already downloaded, instead of downloading
+  the whole doc again. (The Google Docs API can't fetch part of a document,
+  so true paging isn't possible.)
 - **Python 3.11 or newer is now required** (was 3.10). Python 3.10
   reached end-of-life in October 2026 and Google's client libraries have
   dropped it. CI tests 3.11 and 3.14.

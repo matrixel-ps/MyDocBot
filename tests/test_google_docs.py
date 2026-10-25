@@ -197,3 +197,33 @@ class TestOfflineErrorMessages:
     ])
     def test_is_offline_error(self, error, expected):
         assert google_docs.is_offline_error(error) is expected
+
+
+class TestFieldMasks:
+    """A5: the Docs API can't page content, but `fields` drops what we never read."""
+
+    def _service(self, doc=None):
+        service = MagicMock()
+        service.documents.return_value.get.return_value.execute.return_value = doc or {"title": "T"}
+        return service
+
+    def test_fetch_doc_asks_only_for_title_and_text(self):
+        service = self._service()
+        google_docs.fetch_doc(service, "d1")
+        service.documents.return_value.get.assert_called_with(documentId="d1", fields=google_docs.CONTENT_FIELDS)
+
+    def test_fetch_doc_title_asks_only_for_title(self):
+        google_docs.invalidate_title_cache()
+        service = self._service()
+        assert google_docs.fetch_doc_title(service, "d2") == "T"
+        service.documents.return_value.get.assert_called_with(documentId="d2", fields=google_docs.TITLE_FIELDS)
+
+    def test_content_fetch_refreshes_the_title_cache(self):
+        google_docs.invalidate_title_cache()
+        service = self._service({"title": "New name", "body": {"content": []}})
+        google_docs.fetch_doc(service, "d3")
+        assert google_docs.fetch_doc_title(MagicMock(side_effect=AssertionError), "d3") == "New name"
+
+    def test_masks_cover_what_the_parsers_read(self):
+        """_doc_text() reads body.content[].paragraph.elements[].textRun.content."""
+        assert google_docs.CONTENT_FIELDS == "title,body/content/paragraph/elements/textRun/content"

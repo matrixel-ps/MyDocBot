@@ -204,8 +204,8 @@ def cmd_export(service, svc_config, current_alias, current_doc_id, args):
             return
         history_size = config.get_history_size(svc_config)
         try:
-            doc = service.documents().get(documentId=current_doc_id).execute()
-            api_entries = google_docs.parse_entries(doc, count=history_size)
+            api_entries = google_docs.parse_entries(google_docs.fetch_doc(service, current_doc_id),
+                                                    count=history_size)
         except Exception as e:
             print(f"Error fetching notes for export: {e}", file=sys.stderr)
             return

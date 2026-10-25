@@ -25,9 +25,9 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 ## Suggested order
 
-1. **A5:** true pagination for `/more`.
-2. **D1:** shorten the README.
-3. **F3:** `/undo` last note.
+1. **D1:** shorten the README.
+2. **F3:** `/undo` last note.
+3. **A6:** file locking for simultaneous read-modify-write.
 
 ## Bugs
 
@@ -53,7 +53,6 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
-| A5 | **True pagination for `/more`** | open | low | M | mydocbot_app.py `cmd_more()`, core/google_docs.py | `/more` re-downloads and re-parses the whole doc to show a few older notes: `O(doc size)` per call as the doc grows. |
 | A6 | **File locking for concurrent CLI + TUI use** | open | low | M | core/storage.py, core/config.py, core/parser.py | Atomic writes are done (2026-10-24): a reader never sees an empty or partial file. What's left: two processes doing read-modify-write on the same file at the same instant (e.g. both `queue_note()`) can still lose one update. Fix with an advisory lock (`fcntl.flock` on a lock file in the data dir) around load-modify-save; POSIX-only. |
 
 ## Docs & agent workflow

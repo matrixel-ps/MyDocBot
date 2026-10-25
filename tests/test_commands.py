@@ -553,3 +553,19 @@ class TestHyphenatedTagCommands:
         cmd_tag_search({}, arg, "doc_1")
         out = capsys.readouterr().out
         assert "#project-alpha  (1 notes)" in out
+
+
+def test_cli_export_uses_masked_retried_fetch(tmp_path, monkeypatch, capsys):
+    """A5: CLI /export (no tag) called documents().get() directly, with no retry or mask."""
+    from googleapiclient.errors import HttpError
+
+    from core import google_docs
+    from core.commands import cmd_export
+    monkeypatch.setattr('core.google_docs.time.sleep', lambda s: None)
+    monkeypatch.chdir(tmp_path)
+    svc = MagicMock()
+    svc.documents().get().execute.side_effect = [HttpError(MagicMock(status=503), b"busy"),
+                                                  make_doc_response("[06/18/26] (10:00)| exported")]
+    cmd_export(svc, {}, "log", "doc_1", [])
+    assert "Exported 1 notes" in capsys.readouterr().out
+    svc.documents.return_value.get.assert_called_with(documentId="doc_1", fields=google_docs.CONTENT_FIELDS)
