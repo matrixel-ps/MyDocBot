@@ -28,6 +28,9 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   Copy it to `docs_config.json`, or keep using `python main.py --add`.
 
 ### Changed
+- **Python 3.11 or newer is now required** (was 3.10). Python 3.10
+  reached end-of-life in October 2026 and Google's client libraries have
+  dropped it. CI tests 3.11 and 3.14.
 - **Hyphenated tags:** `#project-alpha` is now the tag `project-alpha`
   (it used to be cut to `project`), in the index, `/tag`, `/export`, and
   TUI highlighting. Run `/tag reindex` to re-tag older notes.

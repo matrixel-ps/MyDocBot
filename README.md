@@ -54,14 +54,14 @@ timestamp format (see `parse_entries_readable()` below).
 
 ## Tech Stack
 
-- **Language:** Python 3.10+ (developed against 3.14; CI tests both 3.10 and 3.14)
+- **Language:** Python 3.11+ (developed against 3.14; CI tests both 3.11 and 3.14)
 - **CLI:** Standard library (`argparse`, `input` REPL, `subprocess` for editor)
 - **TUI:** [Textual](https://textual.textualize.io/) 8.x (pinned to 8.2.8 in `requirements.txt`) — async widget framework (two apps: read/write and read-only)
 - **Storage:** Google Docs API (`google-api-python-client`, `google-auth-oauthlib`, OAuth 2.0)
 - **Config:** Local JSON files — `docs_config.json` (write-mode aliases), `read_config.json` (read-only aliases), and `tags_index.json` (tag index)
 - **Testing:** pytest (pinned in `requirements-dev.txt`) with monkeypatched Google API — no network needed (includes a headless Textual `run_test()` suite for both TUI apps)
 - **Lint/Types:** ruff (0 errors) + mypy, pinned in `requirements-dev.txt` so CI and local runs use the same versions — both are real CI gates via `lint.sh` (mypy covers `mydocbot_app.py` too, not just `core/`)
-- **CI:** GitHub Actions (`.github/workflows/ci.yml`) installs `requirements-dev.txt` and runs `lint.sh` on Python 3.10 and 3.14 for every push/PR to `main`/`dev`
+- **CI:** GitHub Actions (`.github/workflows/ci.yml`) installs `requirements-dev.txt` and runs `lint.sh` on Python 3.11 and 3.14 for every push/PR to `main`/`dev`
 
 ---
 
@@ -411,7 +411,7 @@ Note body here — multiple lines preserved.
 │   ├── test_validation.py    doc_id, alias, config, note, history_size validators
 │   └── test_tui.py           Headless Textual run_test() suite for MyDocBotApp/ReadOnlyApp
 ├── docs_config.example.json  Example write-mode config with a placeholder doc ID
-├── .github/workflows/ci.yml  GitHub Actions: lint.sh on Python 3.10 + 3.14, push/PR to main/dev
+├── .github/workflows/ci.yml  GitHub Actions: lint.sh on Python 3.11 + 3.14, push/PR to main/dev
 ├── pyproject.toml            Package metadata + `mydocbot` entry point; ruff, mypy, pytest-asyncio config
 ├── lint.sh                   CI gate: ruff → mypy → pytest (all must pass)
 ├── CHANGELOG.md               Notable changes, most-recent-first

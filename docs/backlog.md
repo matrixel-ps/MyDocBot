@@ -25,9 +25,9 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 ## Suggested order
 
-1. **P4:** decide on the Python 3.10 minimum (XS).
-2. **B7:** escape user input in TUI status messages (XS).
-3. **B6:** regression test for the read-only "Today" label (XS).
+1. **B7:** escape user input in TUI status messages (XS).
+2. **B6:** regression test for the read-only "Today" label (XS).
+3. **A1:** timestamp parsing helper (XS).
 
 ## Bugs
 
@@ -40,7 +40,7 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
-| P4 | **Decide whether to raise the minimum Python to 3.11** | open | low | XS | pyproject.toml `requires-python`, .github/workflows/ci.yml, README | On 3.10, google-api-core 2.30.3 warns: "non-supported Python version … Google will not post any further updates … supporting this Python version." Everything passes on 3.10 today (2026-10-24), but future Google client updates won't. Raise to `>=3.11` (CI matrix 3.11 + 3.14), or keep 3.10 and stay on the current pins. |
+| P5 | **Revisit the minimum Python before 2027-10** | open | low | XS | pyproject.toml, .github/workflows/ci.yml, README | google-api-core lists Python 3.11's end of life as 2027-10-24 and already warns about it on 3.11. Before then, raise the minimum to 3.12 (same 6 spots as P4; check `ruff check . --target-version py312`). |
 
 ## Features
 
