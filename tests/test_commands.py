@@ -194,7 +194,7 @@ class TestCmdTag:
 
 
 class TestCmdSearch:
-    """Tests for CLI /search command (fetches from API at search time)."""
+    """Tests for CLI /search command (fetches the whole doc at search time)."""
 
     def _make_service_with(self, text):
         svc = MagicMock()
@@ -237,6 +237,32 @@ class TestCmdSearch:
         cmd_search(svc, {}, "doc_1", ["sprint"])
         assert "1 result" in capsys.readouterr().out
 
+    def test_search_finds_notes_older_than_history_size(self, capsys):
+        """B8: the CLI used to keep only the newest history_size notes before matching."""
+        from core.commands import cmd_search
+        text = "\n".join(f"[06/{d:02d}/26] (10:00)| note {d}" for d in range(28, 0, -1))
+        text += "\n[05/01/26] (09:00)| the needle note"
+        svc = self._make_service_with(text)
+        cmd_search(svc, {"history_size": 5}, "doc_1", ["needle"])
+        out = capsys.readouterr().out
+        assert "1 result" in out and "[05/01/26] (09:00)| the needle note" in out
+
+    def test_search_retries_transient_fetch_error(self, capsys, monkeypatch):
+        from googleapiclient.errors import HttpError
+
+        from core.commands import cmd_search
+        monkeypatch.setattr('core.google_docs.time.sleep', lambda s: None)
+        svc = MagicMock()
+        svc.documents().get().execute.side_effect = [
+            HttpError(MagicMock(status=503), b"busy"), make_doc_response("[06/18/26] (10:00)| found it")]
+        cmd_search(svc, {}, "doc_1", ["found"])
+        assert "1 result" in capsys.readouterr().out
+
+    def test_help_says_whole_doc(self, capsys):
+        from core.commands import cmd_help
+        cmd_help()
+        assert "Search all notes in this doc" in capsys.readouterr().out
+
     def test_search_multi_word_keyword(self, capsys):
         from core.commands import cmd_search
         note_text = "[06/18/26] (10:00)| sprint review completed successfully"
@@ -245,17 +271,18 @@ class TestCmdSearch:
         out = capsys.readouterr().out
         assert "1 result" in out
 
-    def test_search_respects_history_size(self, capsys):
-        """history_size from svc_config is passed to parse_entries as count."""
+    def test_search_ignores_history_size(self, capsys):
+        """B8: search parses the whole doc (count=None) whatever history_size is.
+        Replaces test_search_respects_history_size, which pinned the old
+        newest-N-only behavior."""
         from core.commands import cmd_search
         svc = MagicMock()
         svc.documents().get().execute.return_value = {"body": {"content": []}}
         with patch('core.commands.google_docs.parse_entries') as mock_parse:
             mock_parse.return_value = []
             cmd_search(svc, {"history_size": 75}, "doc_1", ["anything"])
-            # parse_entries(doc, count=75) — count is a keyword arg
             mock_parse.assert_called_once()
-            assert mock_parse.call_args[1].get('count') == 75
+            assert mock_parse.call_args[1].get('count', 'missing') is None
 
     def test_search_no_doc_id(self, capsys):
         from core.commands import cmd_search

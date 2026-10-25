@@ -424,15 +424,13 @@ def cmd_search(service, svc_config, current_doc_id, args):
         print("No active document to search.")
         return
     keyword = ' '.join(args)
-    history_size = config.get_history_size(svc_config)
     try:
-        doc = service.documents().get(documentId=current_doc_id).execute()
-        entries = google_docs.parse_entries(doc, count=history_size)
+        # Every note in the doc, not just the newest history_size (B8).
+        entries = google_docs.parse_entries(google_docs.fetch_doc(service, current_doc_id), count=None)
     except Exception as e:
         print(f"Error fetching notes for search: {e}", file=sys.stderr)
         return
-    results = [(ts, body) for ts, body in entries
-               if keyword.lower() in body.lower()]
+    results = parser.search_entries(entries, keyword)
     if not results:
         print(f"No notes matching '{keyword}'")
         return
@@ -482,7 +480,7 @@ def cmd_help():
     print("  /queue [list]                  List queued notes and why they failed")
     print("  /queue drop <n>                Discard queued note n (asks first)")
     print("  /queue move <n> <alias>        Send queued note n to another alias")
-    print("  /search <keyword>              Search recent notes (fetches from API)")
+    print("  /search <keyword>              Search all notes in this doc")
     print("  /export [<tag>] [--file <path>]  Export notes to Markdown file")
     print("  /tag list                      Show all indexed tags")
     print("  /tag search <t> [--since/--until]  Find notes by tag")

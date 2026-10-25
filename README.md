@@ -59,7 +59,7 @@ timestamp format (see `parse_entries_readable()` below).
 - **TUI:** [Textual](https://textual.textualize.io/) 0.41+ — async widget framework (two apps: read/write and read-only)
 - **Storage:** Google Docs API (`google-api-python-client`, `google-auth-oauthlib`, OAuth 2.0)
 - **Config:** Local JSON files — `docs_config.json` (write-mode aliases), `read_config.json` (read-only aliases), and `tags_index.json` (tag index)
-- **Testing:** pytest 7.4+ with monkeypatched Google API — **317 tests, 0 network needed** (includes a headless Textual `run_test()` suite for both TUI apps)
+- **Testing:** pytest 7.4+ with monkeypatched Google API — **330 tests, 0 network needed** (includes a headless Textual `run_test()` suite for both TUI apps)
 - **Lint/Types:** ruff (0 errors) + mypy — both are real CI gates via `lint.sh` (mypy covers `mydocbot_app.py` too, not just `core/`)
 - **CI:** GitHub Actions (`.github/workflows/ci.yml`) runs `lint.sh` on every push/PR to `main`/`dev`
 
@@ -74,7 +74,7 @@ timestamp format (see `parse_entries_readable()` below).
 - **`/edit`:** Launches `$EDITOR` (falls back: `$EDITOR` → `vim` → `nano` → `vi`). Lines starting with `#` are stripped as draft comments.
 - **`/switch <alias>`:** Changes the active document for the session.
 - **`/add`, `/remove`, `/rename`:** Mutates `docs_config.json` in place. `/remove` prompts for confirmation and auto-switches if the current alias was removed. Alias names are validated (`validate_alias()`): no whitespace, no leading `/`.
-- **`/search <keyword>`:** Fetches recent notes from the API (up to `history_size`) and filters by keyword.
+- **`/search <keyword>`:** Searches every note in the current doc (case-insensitive), fetched fresh from the API — same results as in the TUIs.
 - **`/export [<tag>] [--file <path>]`:** Exports notes to a local Markdown file — either the notes tagged with `<tag>` (from the local tag index) or the most recent notes fetched from the API if no tag is given.
 - **`/config show` / `/config set history_size <n>`:** View or change how many notes are loaded on startup/switch (range 1–500, default 20).
 - **Tag commands:** `/tag list`, `/tag search <tag>`, `/tag stats` — all operate on local `tags_index.json` only. `/tag search` supports `--since` / `--until` date filters. `/tag reindex` rebuilds the current doc's tag entries from the whole doc (picks up older notes, notes typed directly in Google Docs, and edits/deletions); other docs' entries are kept and the previous index is saved as `tags_index.json.bak`.
@@ -99,7 +99,7 @@ timestamp format (see `parse_entries_readable()` below).
   - `Ctrl+E` — Focus input area
   - `Escape` — Back to input
   - `Tab` — Cycle focus: notes → input → submit → notes
-- **Full-text search:** `/search <keyword>` filters session cache and shows results with keyword highlighting.
+- **Full-text search:** `/search <keyword>` searches every note in the current doc (in the background), not just the loaded ones, and shows results with keyword highlighting. If the doc can't be fetched, it searches the loaded notes instead and says so.
 - **`/edit`:** Uses Textual's `self.suspend()` for clean terminal handoff — editor opens in the foreground, TUI resumes on exit.
 - **`/refresh`:** Re-fetches the latest notes from the API for the current document.
 - **`/more`:** Loads older notes beyond the initial startup batch into the cache/list.
@@ -243,7 +243,7 @@ the REPL from a script, use a pseudo-terminal or the one-shot form instead.
 | `/queue [list]` | List queued notes, oldest first, with the reason each one failed |
 | `/queue drop <n>` | Discard queued note `n` (asks first; prints its text) |
 | `/queue move <n> <alias>` | Send queued note `n` to another alias instead |
-| `/search <keyword>` | Full-text search over notes fetched from the API |
+| `/search <keyword>` | Search every note in the current doc (case-insensitive) |
 | `/export [<tag>] [--file <path>]` | Export notes (by tag, or most recent) to a local Markdown file |
 | `/tag list` | All indexed tags + note counts for current doc |
 | `/tag search <tag> [--since MM/DD/YY] [--until MM/DD/YY]` | Notes matching a tag |
@@ -385,7 +385,7 @@ Note body here — multiple lines preserved.
 ```
 .
 ├── main.py                  (199 lines) CLI entry (`mydocbot`), argparse, one-shot capture, REPL loop, --read/--tui dispatch
-├── mydocbot_app.py          (1206 lines) Textual TUIs — BaseNotesApp (shared) + MyDocBotApp
+├── mydocbot_app.py          (1224 lines) Textual TUIs — BaseNotesApp (shared) + MyDocBotApp
 │                            (read/write) + ReadOnlyApp, both extending BaseNotesApp
 ├── core/
 │   ├── __init__.py          Re-exports with __all__
@@ -422,7 +422,7 @@ Note body here — multiple lines preserved.
 ## Testing
 
 ```bash
-python -m pytest tests/ -v                        # All 317 tests
+python -m pytest tests/ -v                        # All 330 tests
 python -m pytest tests/test_parser.py -v          # Parser + queue + date-filter tests
 python -m pytest tests/test_tui.py -v             # Headless Textual TUI tests
 python -m pytest tests/ -k "corrupt"              # Corrupt-JSON resilience tests
@@ -444,7 +444,7 @@ bash lint.sh                                      # ruff + mypy + pytest — all
 | `test_validation.py` | `validate_doc_id`, `validate_alias`, `validate_config`, `validate_note`, `validate_history_size` |
 | `test_tui.py` | `MyDocBotApp`/`ReadOnlyApp` mounted headlessly via Textual's `run_test()`; covers `/config` (incl. the fixed dead-code bug), `/add` alias validation, read-only mount/list/current |
 
-All tests use monkeypatched Google API and temp files — no network, no OAuth. Current total: **317 passed**.
+All tests use monkeypatched Google API and temp files — no network, no OAuth. Current total: **330 passed**.
 `test_tui.py` requires `pytest-asyncio` (configured with `asyncio_mode = "auto"` in `pyproject.toml`).
 
 ---
@@ -460,7 +460,7 @@ All tests use monkeypatched Google API and temp files — no network, no OAuth. 
 - **Notes cache:** 500-entry cap, newest-first. Loaded from the API on startup (`history_size` most recent, default 20) and on each `/switch`; `/refresh` re-fetches, `/more` loads older entries.
 - **Offline queue:** `pending_queue.json` is deleted when empty. The queue is flushed (all docs, oldest first) *before* each new note, because every write is a prepend at the top of the doc. Flushing stops per doc at the first failure, to keep order and to avoid one retry wait per queued note. Use `/flush` to retry manually.
 - **Write failures are classified:** HTTP 400/403/404 are *permanent* (the automatic flush skips that doc until `/flush`, since retrying can't help until you fix something); 401 and an expired/revoked sign-in are *auth* (restart to sign in again; retried automatically); everything else, including unknown errors, is *transient*. The reason is stored with each queued note (`"error"` in `pending_queue.json`). A note moved with `/queue move` keeps its original timestamp, so it can land above newer notes in the target doc.
-- **API retry:** Transient errors (429, 500/502/503/504, `ConnectionError`, `TimeoutError`) get up to 3 attempts with 1 s / 2 s between them (~3 s). Non-transient errors (403, 404) are not retried. "Network is down" errors (`httplib2.ServerNotFoundError` for no DNS; `ENETUNREACH` / `EHOSTUNREACH` / `EADDRNOTAVAIL`) deliberately fail fast and the note is queued at once — a few seconds of backoff almost never brings the network back. The TUI's note fetches (`/refresh`, startup) don't go through the retry at all yet (backlog B10).
+- **API retry:** Transient errors (429, 500/502/503/504, `ConnectionError`, `TimeoutError`) get up to 3 attempts with 1 s / 2 s between them (~3 s). Non-transient errors (403, 404) are not retried. "Network is down" errors (`httplib2.ServerNotFoundError` for no DNS; `ENETUNREACH` / `EHOSTUNREACH` / `EADDRNOTAVAIL`) deliberately fail fast and the note is queued at once — a few seconds of backoff almost never brings the network back. TUI note fetches (startup, `/switch`, `/refresh`, `/more`, `/search`) use the same retry.
 - **`resolve_editor()` shared:** Both CLI and TUI call the same `resolve_editor()` from `core/commands.py`. Editor fallback order: `$EDITOR` → `vim` → `nano` → `vi`.
 - **Independent read/write configs:** `docs_config.json` and `read_config.json` are separate registries so the same alias name can point to different docs (or exist in only one mode) without conflict.
 - **Read-only mode has no write path:** `ReadOnlyApp` never calls `prepend_text()` — it only fetches and displays, using its own timestamp format parser (`parse_entries_readable()`).

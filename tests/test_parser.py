@@ -752,3 +752,20 @@ class TestQueueEditing:
     def test_move_out_of_range(self):
         with pytest.raises(IndexError):
             prs.move_pending(9, "doc_c")
+
+
+class TestSearchEntries:
+    """B8: the one matcher behind /search in the CLI and both TUIs."""
+
+    ENTRIES = [("t3", "Sprint review"), ("t2", "lunch"), ("t1", "line one\nsprint planning")]
+
+    def test_case_insensitive_and_order_kept(self):
+        assert prs.search_entries(self.ENTRIES, "SPRINT") == [("t3", "Sprint review"), ("t1", "line one\nsprint planning")]
+
+    def test_no_match(self):
+        assert prs.search_entries(self.ENTRIES, "zzz") == []
+
+    def test_search_cache_uses_same_rule(self):
+        cache = [{"ts": ts, "text": body, "doc_id": "d"} for ts, body in self.ENTRIES]
+        assert [(n["ts"], n["text"]) for n in prs.search_cache(cache, "d", "SPRINT")] == \
+            prs.search_entries(self.ENTRIES, "SPRINT")

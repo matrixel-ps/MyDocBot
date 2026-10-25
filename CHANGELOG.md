@@ -28,6 +28,11 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   Copy it to `docs_config.json`, or keep using `python main.py --add`.
 
 ### Changed
+- **`/search` searches the whole doc, in the CLI and both TUIs:** it used
+  to look only at the newest notes (CLI) or the notes loaded in the session
+  (TUI), so older notes were never found and the two could disagree. Both
+  now return the same results. If the TUI can't reach Google, it searches
+  the loaded notes and says so.
 - **The TUI no longer freezes while talking to Google:** loading notes,
   saving, `/switch`, `/list`, `/refresh`, `/more`, `/flush`, and
   `/tag reindex` now run in the background. You can keep browsing notes and
@@ -77,6 +82,9 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   changes; `tests/test_tui.py` passes unmodified.
 
 ### Fixed
+- **TUI note loading now retries:** loading notes at startup and on
+  `/switch`, `/refresh`, `/more`, and `/search` retries brief Google errors
+  (429/5xx) like saving does, instead of failing at once.
 - **Offline message:** a write that fails because the network is
   unreachable now says "offline or Google unavailable" instead of showing a
   raw `OSError`. Writing while offline still queues the note at once, with

@@ -468,3 +468,94 @@ async def test_read_only_app_switch_in_background(tmp_read_config_path):
         await settle(app, pilot)
         assert app.current_doc_id == "doc_r2"
     assert service.max_active == 1
+
+
+# ---------------------------------------------------------------------------
+# /search over the whole doc (B8) and retried note fetches (B10)
+# ---------------------------------------------------------------------------
+
+# 25 notes, newest first; the needle is the oldest, beyond the default
+# history_size (20), so it is never in the startup cache.
+SEARCH_DOC = "\n".join(f"[06/{d:02d}/26] (10:00)| note {d}" for d in range(25, 1, -1)) + \
+    "\n[05/01/26] (09:00)| the needle note\n"
+
+
+@pytest.mark.asyncio
+async def test_search_finds_notes_not_loaded(tmp_config_path, sample_config, tmp_tags_index_path, tmp_pending_path):
+    app = _blocking_app(sample_config, BlockingService(doc_text=SEARCH_DOC))
+    async with mounted(app) as pilot:
+        assert not any("needle" in n["text"] for n in app.notes_cache)
+        shown = []
+        with patch.object(app, '_show_search_results', side_effect=lambda k, r, note=None: shown.append((r, note))):
+            app.handle_command('/search NEEDLE')
+            await settle(app, pilot)
+        assert shown == [([("[05/01/26] (09:00)|", "the needle note")], None)]
+
+
+@pytest.mark.asyncio
+async def test_search_falls_back_to_loaded_notes(tmp_config_path, sample_config, tmp_tags_index_path,
+                                                 tmp_pending_path, monkeypatch):
+    app = _blocking_app(sample_config, BlockingService(doc_text=SEARCH_DOC))
+    async with mounted(app) as pilot:
+        def offline(doc_id, count):
+            raise OSError(101, "Network is unreachable")
+        monkeypatch.setattr(app, '_fetch_recent', offline)
+        app.handle_command('/search note 2')
+        await settle(app, pilot)
+        status = str(app.query_one("#status-bar").render())
+        assert "searched the 20 loaded notes only" in status
+        assert "match(es) for 'note 2'" in status
+
+
+@pytest.mark.asyncio
+async def test_read_only_search_covers_whole_doc(tmp_read_config_path):
+    old = "\n".join(f"{d:02d}/06/2026\n[10.00]\nread note {d}" for d in range(25, 1, -1))
+    config.save_read_config({"default": "a", "aliases": {"a": "doc_r1"}})
+    with patch('mydocbot_app.google_docs.get_service',
+               return_value=BlockingService(doc_text=old + "\n01/05/2026\n[9.00]\nancient needle\n")):
+        app = ReadOnlyApp()
+    async with mounted(app) as pilot:
+        shown = []
+        with patch.object(app, '_show_search_results', side_effect=lambda k, r, note=None: shown.append(r)):
+            app.handle_command('/search needle')
+            await settle(app, pilot)
+        assert [body for _, body in shown[0]] == ["ancient needle"]
+
+
+def test_cli_and_tui_search_give_same_results(tmp_config_path, sample_config, capsys):
+    """B8 parity: same doc, same keyword, same notes in the same order."""
+    from core.commands import cmd_search
+    service = BlockingService(doc_text=SEARCH_DOC)
+    cmd_search(service, sample_config, "doc_id_123", ["note", "1"])
+    cli_ts = [line.strip().split("| ", 1)[0] + "|"
+              for line in capsys.readouterr().out.splitlines() if line.startswith("  [")]
+    app = _blocking_app(sample_config, service)
+    tui_ts = [ts for ts, _ in prs.search_entries(app._fetch_recent("doc_id_123", None), "note 1")]
+    assert cli_ts == tui_ts and len(cli_ts) > 1
+
+
+@pytest.mark.parametrize("cls", [MyDocBotApp, ReadOnlyApp])
+def test_fetch_recent_retries_transient_errors(cls, tmp_config_path, tmp_read_config_path, sample_config, monkeypatch):
+    """B10: note fetches go through fetch_doc(), so a 503 is retried like a write."""
+    from unittest.mock import MagicMock
+
+    from googleapiclient.errors import HttpError
+    monkeypatch.setattr('core.google_docs.time.sleep', lambda s: None)
+    service = MagicMock()
+    service.documents.return_value.get.return_value.execute.side_effect = [
+        HttpError(MagicMock(status=503), b"busy"), make_doc_response("")]
+    config.save_config(sample_config)
+    with patch('mydocbot_app.google_docs.get_service', return_value=service):
+        app = cls()
+    assert app._fetch_recent("doc_x", 5) == []
+    assert service.documents.return_value.get.return_value.execute.call_count == 2
+
+
+@pytest.mark.asyncio
+async def test_help_says_search_covers_whole_doc(write_app):
+    async with mounted(write_app) as pilot:
+        shown = []
+        with patch.object(write_app.query_one("#preview-pane"), 'write', side_effect=shown.append):
+            write_app.handle_command('/help')
+            await pilot.pause()
+        assert "Search all notes in this doc" in shown[-1]

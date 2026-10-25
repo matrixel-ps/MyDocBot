@@ -508,22 +508,40 @@ class BaseNotesApp(App):
             self.update_status("Usage: /search <keyword>")
             return
         keyword = ' '.join(args)
-        results = parser.search_cache(self.notes_cache, self.current_doc_id, keyword)
+        doc_id = self.current_doc_id
+
+        def done(entries):
+            self._show_search_results(keyword, parser.search_entries(entries, keyword))
+
+        def fallback(e):
+            # Can't fetch the doc: search what's loaded, and say it's partial.
+            loaded = sum(1 for n in self.notes_cache if n["doc_id"] == doc_id)
+            results = [(n["ts"], n["text"]) for n in parser.search_cache(self.notes_cache, doc_id, keyword)]
+            self._show_search_results(
+                keyword, results,
+                note=f"Couldn't fetch the doc ({e}) — searched the {loaded} loaded notes only.")
+
+        # Every note in the doc, like the CLI (B8), not just the loaded ones.
+        self.run_api("searching", lambda: self._fetch_recent(doc_id, None), done, fallback)
+
+    def _show_search_results(self, keyword, results, note=None):
+        suffix = f"  {md_escape(note)}" if note else ""
         if not results:
-            self.update_status(f"No notes matching '{md_escape(keyword)}'")
+            self.update_status(f"No notes matching '{md_escape(keyword)}'.{suffix}")
             return
         lines = [f"[b]Search: {md_escape(keyword)}[/]   {len(results)} notes\n"]
-        for n in results:
-            preview_text = n["text"].replace('\n', ' ')[:100]
+        for ts, body in results:
+            preview_text = body.replace('\n', ' ')[:100]
             highlighted = re.sub(
                 f'({re.escape(keyword)})', r'[bold #f9e2af]\1[/]',
                 md_escape(preview_text), flags=re.IGNORECASE
             )
-            lines.append(f"[#a6e3a1]{md_escape(n['ts'])}[/] {highlighted}")
+            lines.append(f"[#a6e3a1]{md_escape(ts)}[/] {highlighted}")
         preview = self.query_one("#preview-pane")
         preview.clear()
         preview.write("\n".join(lines))
         preview.scroll_home(animate=False)
+        self.update_status(f"{len(results)} match(es) for '{md_escape(keyword)}'.{suffix}")
 
     def cmd_refresh(self):
         doc_id = self.current_doc_id
@@ -601,7 +619,7 @@ class MyDocBotApp(BaseNotesApp):
 
     def _fetch_recent(self, doc_id, count):
         return google_docs.parse_entries(
-            self._service.documents().get(documentId=doc_id).execute(),
+            google_docs.fetch_doc(self._service, doc_id),  # with retry (B10)
             count=count
         )
 
@@ -1072,7 +1090,7 @@ class MyDocBotApp(BaseNotesApp):
             "  /refresh                    Fetch latest notes from API\n"
             "  /more                       Load older notes beyond startup\n"
             "  /export [<tag>] [--file]     Export notes to Markdown file\n"
-            "  /search <keyword>           Search notes (session cache)\n"
+            "  /search <keyword>           Search all notes in this doc\n"
             "  /tag list                   Show all tags\n"
             "  /tag search <tag>           Find notes by tag\n"
             "  /tag stats                  Tag frequency chart\n"
@@ -1116,7 +1134,7 @@ class ReadOnlyApp(BaseNotesApp):
 
     def _fetch_recent(self, doc_id, count):
         return google_docs.parse_entries_readable(
-            self._service.documents().get(documentId=doc_id).execute(),
+            google_docs.fetch_doc(self._service, doc_id),  # with retry (B10)
             count=count
         )
 
@@ -1197,7 +1215,7 @@ class ReadOnlyApp(BaseNotesApp):
             "  /list                        List documents\n"
             "  /add <a> <id>               Add document to read-only config\n"
             "  /current                     Show active doc\n"
-            "  /search <keyword>            Search notes (session cache)\n"
+            "  /search <keyword>            Search all notes in this doc\n"
             "  /refresh                     Fetch latest notes from API\n"
             "  /more                        Load older notes beyond startup\n"
             "  /help                        This message\n\n"

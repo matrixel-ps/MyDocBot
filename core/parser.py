@@ -97,10 +97,21 @@ def reindex_doc(service, doc_id):
     return ReindexResult("reindexed", len(entries), tagged, doc_tags, before, _count_doc_entries(index, doc_id))
 
 
+def _matches(text, keyword):
+    return keyword.lower() in text.lower()
+
+
+def search_entries(entries, keyword):
+    """(ts, body) entries whose body contains keyword, case-insensitively, in the
+    given order. The one matching rule behind /search in the CLI and both TUIs."""
+    return [(ts, body) for ts, body in entries if _matches(body, keyword)]
+
+
 def search_cache(cache, doc_id, keyword):
+    """Same rule over the TUI's loaded notes; its fallback when the doc can't be fetched."""
     return [n for n in cache
             if n["doc_id"] == doc_id
-            and keyword.lower() in n["text"].lower()]
+            and _matches(n["text"], keyword)]
 
 
 def _parse_date(date_str):

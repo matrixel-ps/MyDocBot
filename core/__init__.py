@@ -21,6 +21,7 @@ from .parser import (
     reindex_doc,
     save_tags_index,
     search_cache,
+    search_entries,
 )
 from .validation import (
     validate_doc_id,
@@ -35,6 +36,6 @@ __all__ = [
     "validate_doc_id", "validate_history_size", "validate_note",
     "export_to_markdown",
     "extract_tags", "index_note", "load_tags_index", "save_tags_index",
-    "search_cache", "queue_note", "reindex_doc", "flush_pending_notes", "count_pending",
+    "search_cache", "search_entries", "queue_note", "reindex_doc", "flush_pending_notes", "count_pending",
     "SubmitResult", "format_timestamp", "submit_note",
 ]
