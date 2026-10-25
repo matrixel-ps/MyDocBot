@@ -8,10 +8,10 @@ is in `docs/agent-notes/project-snapshot.md` ("Design Decisions") and
 ## Data flow
 
 ```
-User input (CLI / TUI / read-only TUI)
+User input (CLI / TUI / read-only TUI / Discord DM)
        │
        ▼
-  Dispatch (main.py / mydocbot_app.py)
+  Dispatch (main.py / mydocbot_app.py / discord_bot.py)
        │
        ├──▶ Command handlers ──▶ core/config.py      aliases, read + write configs
        │                       ▶ core/parser.py      tags, search, queue, date filters
@@ -34,18 +34,24 @@ newest first. That's why queued notes must be written *before* a new one.
 
 | Module | Responsibility | Key functions |
 |---|---|---|
-| `notes.py` | The one write path (CLI, `/edit`, TUI, one-shot) | `submit_note()` → `SubmitResult` |
+| `notes.py` | The one write path (CLI, `/edit`, TUI, one-shot, Discord) | `submit_note()` → `SubmitResult` |
 | `google_docs.py` | Sign-in, API calls, retry, field masks, parsers | `get_service()`, `fetch_doc()`, `fetch_doc_title()`, `try_prepend()`, `prepend_text()`, `classify_write_error()`, `parse_entries()`, `parse_entries_readable()` |
 | `parser.py` | Tags, offline queue, search, date filters, reindex | `extract_tags()`, `index_note()`, `reindex_doc()`, `queue_note()`, `flush_pending_notes()`, `search_entries()`, `filter_tag_entries_by_date()` |
 | `timestamps.py` | The `[MM/DD/YY] (HH:MM)\|` format, in one place | `format_timestamp()`, `parse_timestamp()`, `date_key()`, `parse_date_flag()`, `HEADER_PATTERN` |
 | `config.py` | Write and read-only alias configs | `load_config()`, `save_config()`, `resolve_alias()`, `get_history_size()`, `load_read_config()`, `save_read_config()` |
-| `storage.py` | Atomic `0600` writes; corrupt-file quarantine | `write_json()`, `write_text()`, `quarantine()` |
+| `storage.py` | Atomic `0600` writes; corrupt-file quarantine; cross-process locking | `write_json()`, `write_text()`, `quarantine()`, `locked()` |
 | `paths.py` | Where the data lives; first-run migration | `resolve_data_dir()`, `data_path()`, `prepare_data_dir()` |
 | `validation.py` | Input guards | `validate_doc_id()`, `validate_alias()`, `validate_config()`, `validate_note()`, `validate_history_size()` |
+| `discord_handler.py` | What the Discord bot does with a DM (no discord import) | `load_token()`, `load_allowed_users()`, `is_allowed()`, `split_alias()`, `write_note()` |
 | `commands.py` | CLI command handlers, plus text shared with the TUI | `dispatch()`, `cmd_*()`, `queued_text()`, `queue_lines()`, `reindex_message()`, `resolve_editor()`, `export_to_markdown()` |
 
 `main.py` parses arguments, prepares the data dir, and runs one-shot
 capture, the REPL, or a TUI. `mydocbot_app.py` holds both Textual apps.
+`discord_bot.py` (`mydocbot-discord`, optional `discord` extra) is a thin
+discord.py client: `NoteBot.on_message()` checks the allowlist, runs
+`discord_handler.write_note()` in a worker thread (one at a time, since
+httplib2 isn't thread-safe) and replies. discord.py is imported only in
+`main()`, so the tests need neither it nor a network.
 
 ## The TUIs
 
@@ -105,6 +111,22 @@ failure (`kind` is `transient`, `auth` or `permanent`):
 It is deleted when empty. `read_config.json` has the same shape as
 `docs_config.json` (`default`, `aliases`, optional `history_size`).
 
+`discord_config.json` lists the Discord user IDs the bot obeys (strings or
+numbers; it must not be empty). The bot token is in `discord_token` (plain
+text, `0600`) or `$MYDOCBOT_DISCORD_TOKEN`:
+
+```json
+{"allowed_user_ids": ["111111111111111111"]}
+```
+
+**Locking (A6):** every load-modify-save of `pending_queue.json` and
+`tags_index.json` runs under `storage.locked()`: an `fcntl.flock` on
+`<file>.lock` (never deleted) plus a per-file reentrant thread lock. A flush
+also takes `pending_queue.json.flush.lock` without waiting; if another flush
+holds it, it returns at once. The queue lock isn't held during Google calls;
+`_save_flush_result()` reapplies the flush to the queue as it is then. The
+configs are not locked (backlog A7).
+
 ## Design notes
 
 - **Submit is `Ctrl+S` or the button:** `Ctrl+Enter` was unreliable across
@@ -145,6 +167,8 @@ touches real files. TUI tests use Textual's headless `run_test()` through
 | `test_timestamps.py` | Timestamp format / parse, date keys and flags |
 | `test_config.py` | Config load / save / resolve, corrupt fallback |
 | `test_storage.py` | Atomic writes: readers never see a truncated file; `0600` |
+| `test_locking.py` | `storage.locked()`; concurrent processes/threads lose no queue or tag update; flush exclusivity and reconcile |
+| `test_discord.py` | Discord bot: alias prefix, allowlist, token/allowlist loading, `write_note`, `NoteBot` with fake messages, `main()` exit codes |
 | `test_corrupt_backup.py` | Corrupt files moved to timestamped backups; unreadable files left alone |
 | `test_paths.py` | Data-dir resolution and one-time migration |
 | `test_commands.py` | CLI commands, including `/queue`, `/search`, `/tag reindex`, `/export` |

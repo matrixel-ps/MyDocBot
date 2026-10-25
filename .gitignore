@@ -15,6 +15,10 @@ read_config.json
 tags_index.json
 pending_queue.json
 
+# Discord bot secrets and allowlist (normally in the data dir, not here)
+discord_token
+discord_config.json
+
 # Packaging artifacts from `pip install -e .`
 *.egg-info/
 build/

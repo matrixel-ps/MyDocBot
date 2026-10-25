@@ -27,6 +27,8 @@ def _isolate_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr('core.parser.PENDING_PATH', str(data_dir / 'pending_queue.json'))
     monkeypatch.setattr('core.google_docs.TOKEN_PATH', str(data_dir / 'token.json'))
     monkeypatch.setattr('core.google_docs.CREDENTIALS_PATH', str(data_dir / 'credentials.json'))
+    monkeypatch.setattr('core.discord_handler.DISCORD_CONFIG_PATH', str(data_dir / 'discord_config.json'))
+    monkeypatch.setattr('core.discord_handler.DISCORD_TOKEN_PATH', str(data_dir / 'discord_token'))
     return data_dir
 
 

@@ -19,11 +19,16 @@ dependencies = [
     "rich>=13.0.0",
 ]
 
+[project.optional-dependencies]
+# The Discord bot (mydocbot-discord); install with: pip install -e '.[discord]'
+discord = ["discord.py>=2.4"]
+
 [project.scripts]
 mydocbot = "main:main"
+mydocbot-discord = "discord_bot:main"
 
 [tool.setuptools]
-py-modules = ["main", "mydocbot_app"]
+py-modules = ["main", "mydocbot_app", "discord_bot"]
 packages = ["core"]
 
 [tool.ruff]
@@ -42,7 +47,7 @@ asyncio_mode = "auto"
 
 [tool.coverage.run]
 # What coverage.sh measures (D3). Report only: nothing fails on a percentage.
-source = ["core", "main", "mydocbot_app"]
+source = ["core", "main", "mydocbot_app", "discord_bot"]
 
 [tool.coverage.report]
 show_missing = true
