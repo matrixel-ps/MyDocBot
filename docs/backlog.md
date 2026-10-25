@@ -25,9 +25,9 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 ## Suggested order
 
-1. **P2:** split runtime vs. dev dependencies and pin the lint tools.
-2. **D2:** stop hard-coding numbers that drift (test counts in ~8 places).
-3. **F5:** hyphenated tags (XS).
+1. **D2:** stop hard-coding numbers that drift (test counts in ~8 places).
+2. **F5:** hyphenated tags (XS).
+3. **P4:** decide on the Python 3.10 minimum (XS).
 
 ## Bugs
 
@@ -40,8 +40,7 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
-| P2 | **Split runtime vs. dev dependencies, pin lint tools** | open | med | S | requirements.txt, .github/workflows/ci.yml | pytest sits next to runtime packages, and CI installs unpinned ruff/mypy (local pins: `ruff==0.15.18`, `mypy==2.1.0`). Add `requirements-dev.txt` or pyproject optional-deps. |
-| P3 | **CI Python version doesn't match local** | open | low | XS | .github/workflows/ci.yml | CI runs 3.11, local is 3.14, and the stated minimum is 3.10. Use a 3.10 + 3.14 matrix. |
+| P4 | **Decide whether to raise the minimum Python to 3.11** | open | low | XS | pyproject.toml `requires-python`, .github/workflows/ci.yml, README | On 3.10, google-api-core 2.30.3 warns: "non-supported Python version … Google will not post any further updates … supporting this Python version." Everything passes on 3.10 today (2026-10-24), but future Google client updates won't. Raise to `>=3.11` (CI matrix 3.11 + 3.14), or keep 3.10 and stay on the current pins. |
 
 ## Features
 
