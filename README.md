@@ -59,6 +59,7 @@ files by hand.
 | `read_config.json` | `/add` inside `--read` | Read-only doc aliases (separate list) |
 | `tags_index.json` | Each note you write | Local `#tag` index |
 | `pending_queue.json` | A write that couldn't be sent | Notes waiting to be written |
+| `last_write.json` | Each note you write | The last note written to each doc, for `/undo` |
 | `discord_token` | You (Discord Developer Portal) | Bot token, only for the [Discord bot](#discord-bot) |
 | `discord_config.json` | You | Discord user IDs the bot obeys; optional docs to watch |
 | `watch_state.json` | The bot's watcher | Last seen state of each watched doc (hashes only, no note text) |
@@ -89,6 +90,7 @@ mydocbot                     # CLI: type notes line by line
 mydocbot --doc work          # CLI on another alias
 mydocbot --tui               # full-screen read/write app
 mydocbot --read [alias]      # read-only browser (uses read_config.json)
+mydocbot --undo              # remove the last note you wrote to the default doc
 mydocbot --list              # list aliases and exit
 mydocbot --add <alias> <id>  # add an alias and exit
 mydocbot-discord             # Discord bot: DM it to write a note (optional extra)
@@ -107,6 +109,27 @@ indexing. Success prints one line; errors go to stderr. Exit codes: `0` sent,
 `1` rejected or config error, `2` usage error, `3` queued (not sent yet).
 Piping text in always means "write this note", so you can't drive the REPL
 from a pipe.
+
+### Undo the last note
+
+`/undo` (or `mydocbot --undo [-d alias]` from a shell) removes the last note
+MyDocBot wrote to a doc, for a typo, the wrong doc or an accidental submit.
+It only deletes if the top of the doc is still exactly that note, so it never
+removes something written since, by you or anyone else. If the top has
+changed, nothing is deleted and you're told. It undoes one note: a second
+`/undo` finds nothing. The note's tags leave the index too.
+
+- **It works across sessions:** `mydocbot "oops"` then `mydocbot --undo`, or a
+  TUI note undone from the CLI, since the last note is remembered in
+  `last_write.json`.
+- **Queued notes:** if the doc has notes waiting in the queue, `/undo`
+  refuses and points to `/queue drop`, since a queued note was never written.
+- **Not covered:** notes written by `/flush` (the top won't match, so it
+  refuses), and the read-only TUI.
+- **Asking first:** the CLI shows the note and asks y/N. The TUI removes it
+  and says what it removed. `--undo` asks only when run from a terminal.
+- **Exit codes for `--undo`:** `0` removed, `1` nothing to undo, doc changed,
+  queued notes or canceled, `3` offline (try again).
 
 ### Discord bot
 
@@ -297,6 +320,7 @@ Type `/help` in any interface for its list.
 | `/queue [list]` | List queued notes and why each failed | ✓ | ✓ | |
 | `/queue drop <n>` | Discard queued note `n` (the CLI asks first; its text is shown) | ✓ | ✓ | |
 | `/queue move <n> <alias>` | Send queued note `n` to another alias | ✓ | ✓ | |
+| `/undo` | Remove your last note from this doc, if it's still at the top (the CLI asks first) | ✓ | ✓ | |
 | `/tag list` / `/tag stats` | Tags in this doc, with counts / a bar chart | ✓ | ✓ | |
 | `/tag search <tag> [--since D] [--until D]` | Notes with a tag; dates `MM/DD/YY` or `MM/DD/YYYY` | ✓ | ✓ | |
 | `/tag reindex` | Rebuild this doc's tags from the doc itself | ✓ | ✓ | |

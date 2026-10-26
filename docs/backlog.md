@@ -25,9 +25,8 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 ## Suggested order
 
-1. **F3:** `/undo` last note.
-2. **A7:** config saves that don't overwrite another process's changes.
-3. **F9:** multi-doc tag aggregation.
+1. **A7:** config saves that don't overwrite another process's changes.
+2. **F9:** multi-doc tag aggregation.
 
 ## Bugs
 
@@ -44,10 +43,10 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
-| F3 | **`/undo` last note** | open | low | M | core/google_docs.py, commands, TUI | Remove the range MyDocBot just wrote at the top of the doc, but only if the top entry still matches what was written. |
 | F7 | **Configurable note formats per alias** | open | low | L | core/google_docs.py, core/config.py | Replace the two hard-coded parsers with a format setting per alias, so the read-only TUI can browse other doc layouts without new code. |
 | F8 | **Tag autocomplete in TUI** | open | low | M | mydocbot_app.py | Suggest known tags from `tags_index.json` when the user types `#` in the read/write TUI input (`on_text_area_changed`). |
 | F9 | **Multi-doc tag aggregation** | open | low | S | core/commands.py `cmd_tag_*`, mydocbot_app.py | An `--all` flag for `/tag` commands to aggregate across all configured docs, not just the active one. `/tag reindex` (F4) is per-doc too; `--all` there would loop over the aliases. |
+| F12 | **`/undo` over Discord** | open | low | S | core/discord_handler.py, discord_bot.py | Let the allowlisted user undo their last bot-written note with a DM (e.g. `/undo`), using `undo.undo_last()`. Left out of F3. |
 
 ## Architecture & refactors
 

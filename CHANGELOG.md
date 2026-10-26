@@ -7,6 +7,14 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
 ## [Unreleased]
 
 ### Added
+- **`/undo` for the last note:** remove the note you just wrote (a typo, the
+  wrong doc, an accidental submit) from the CLI or the read/write TUI, or from
+  a shell with `mydocbot --undo`. It deletes only if the top of the doc is
+  still exactly that note, so it never removes anything written since; if the
+  doc changed it tells you and deletes nothing. One note back, and its tags
+  leave the index. It also works across sessions (`mydocbot "oops"`, then
+  `mydocbot --undo`). If the doc has queued notes it points you to
+  `/queue drop`. The CLI asks y/N first.
 - **Discord bot:** DM a private Discord bot and the message is written as a
   note, with the same validation, offline queueing and tag indexing as quick
   capture. `-d <alias>` picks another doc, and the bot replies with one line

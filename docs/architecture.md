@@ -25,6 +25,7 @@ User input (CLI / TUI / read-only TUI / Discord DM)
                ├── 3. still queued for this doc?     queue behind them, don't try
                ├── 4. try_prepend(...)               None, or a WriteFailure
                └── 5. index_note(...) on success, queue_note(..., failure) otherwise
+                     (on success also: undo.record_write(...) → last_write.json)
 ```
 
 Every write is an `insertText` at index 1 (a prepend), so the doc reads
@@ -35,8 +36,9 @@ newest first. That's why queued notes must be written *before* a new one.
 | Module | Responsibility | Key functions |
 |---|---|---|
 | `notes.py` | The one write path (CLI, `/edit`, TUI, one-shot, Discord) | `submit_note()` → `SubmitResult` |
-| `google_docs.py` | Sign-in, API calls, retry, field masks, parsers | `get_service()`, `fetch_doc()`, `fetch_doc_title()`, `try_prepend()`, `prepend_text()`, `classify_write_error()`, `parse_entries()`, `parse_entries_readable()` |
-| `parser.py` | Tags, offline queue, search, date filters, reindex | `extract_tags()`, `index_note()`, `reindex_doc()`, `queue_note()`, `flush_pending_notes()`, `search_entries()`, `filter_tag_entries_by_date()` |
+| `google_docs.py` | Sign-in, API calls, retry, field masks, parsers | `get_service()`, `fetch_doc()`, `fetch_doc_title()`, `try_prepend()`, `prepended()`, `try_undo()`, `utf16_len()`, `prepend_text()`, `classify_write_error()`, `parse_entries()`, `parse_entries_readable()` |
+| `undo.py` | `/undo` (F3): the last-write record per doc, and undoing it | `record_write()`, `check_undo()`, `undo_last()` → `UndoResult`, `undo_message()` |
+| `parser.py` | Tags, offline queue, search, date filters, reindex | `extract_tags()`, `index_note()`, `unindex_note()`, `reindex_doc()`, `queue_note()`, `flush_pending_notes()`, `search_entries()`, `filter_tag_entries_by_date()` |
 | `timestamps.py` | The `[MM/DD/YY] (HH:MM)\|` format, in one place | `format_timestamp()`, `parse_timestamp()`, `date_key()`, `parse_date_flag()`, `HEADER_PATTERN` |
 | `config.py` | Write and read-only alias configs | `load_config()`, `save_config()`, `resolve_alias()`, `get_history_size()`, `load_read_config()`, `save_read_config()` |
 | `storage.py` | Atomic `0600` writes; corrupt-file quarantine; cross-process locking | `write_json()`, `write_text()`, `quarantine()`, `locked()` |
@@ -102,6 +104,18 @@ Layout (both): header · notes ListView (24 cols, date + time per note via the
 - **Status bar:** shows plain text (`rich.text.Text`), never markup,
   because messages contain user input.
 
+**Undo (F3).** `submit_note()` saves `prepended()`, the exact string it
+inserted, in `last_write.json` after a `"sent"` result (a failed save is only
+a warning; the note is already in the doc). `undo_last()` refuses if notes
+for the doc are queued, else `try_undo()` fetches the doc with `revisionId`,
+checks `_leading_text()` (the paragraphs from index 1, stopping at the first
+table) starts with the string, and sends one `deleteContentRange`
+over `[1, 1 + utf16_len(written))` with `writeControl.requiredRevisionId`, so
+an edit between check and delete makes Google reject it instead of removing
+the wrong text. Docs indexes count UTF-16 units (an emoji is 2). A 400 is
+re-checked and reported as "changed". Then `unindex_note()` drops this note's
+tag entries, and the record is cleared.
+
 ## Data file formats
 
 All files live in the data directory (see README). They are written by
@@ -121,7 +135,17 @@ failure (`kind` is `transient`, `auth` or `permanent`):
   "error": {"kind": "transient", "message": "offline or Google unavailable"}}]
 ```
 
-It is deleted when empty. `read_config.json` has the same shape as
+It is deleted when empty.
+
+`last_write.json` holds the last sent note per doc ID (`ts`, `text`, and
+`written`, the exact inserted string), cleared by a successful or "changed"
+undo:
+
+```json
+{"<doc_id>": {"ts": "[06/18/26] (14:30)|", "text": "met with Sam", "written": "[06/18/26] (14:30)| met with Sam\n\n"}}
+```
+
+`read_config.json` has the same shape as
 `docs_config.json` (`default`, `aliases`, optional `history_size`).
 
 `discord_config.json` lists the Discord user IDs the bot obeys (strings or
@@ -184,6 +208,7 @@ touches real files. TUI tests use Textual's headless `run_test()` through
 | File | Covers |
 |---|---|
 | `test_main.py` | REPL submit / queue / flush, `--add`, prompt, one-shot capture and exit codes |
+| `test_undo.py` | `/undo`: record on sent only, `try_undo` (exact range, `requiredRevisionId`, UTF-16, refusals, conflicts), tag removal, CLI and TUI `/undo`, `--undo` exit codes, `0600` record |
 | `test_notes.py` | `submit_note()`: sent / queued / rejected, flush-first order, queue-behind |
 | `test_google_docs.py` | Sign-in recovery, write-failure classification, `try_prepend`, field masks |
 | `test_parser.py` | Tags, `parse_entries`, retry, search, date filters, reindex, queue errors and editing |
