@@ -396,7 +396,7 @@ The TUI uses a dark, Catppuccin-inspired theme.
 ├── requirements-dev.txt  requirements.txt + pinned pytest, pytest-asyncio, pytest-cov, ruff, mypy
 ├── lint.sh               The gate: ruff → mypy → pytest
 ├── coverage.sh           Coverage report (report only)
-└── .github/workflows/ci.yml   lint.sh on Python 3.11 and 3.14
+└── .github/workflows/ci.yml   lint.sh on Python 3.11, 3.14, 3.15
 ```
 
 See [`docs/architecture.md`](docs/architecture.md) for how the pieces fit:
@@ -411,8 +411,8 @@ bash coverage.sh [--html]                  # which lines no test reaches
 ```
 
 Tests mock the Google API and use temporary files, so they need no network
-or sign-in, and never touch your real data. CI runs `lint.sh` on Python 3.11
-and 3.14 for every push and pull request to `main` and `dev`. Tool versions
+or sign-in, and never touch your real data. CI runs `lint.sh` on Python 3.11,
+3.14 and 3.15 for every push and pull request to `main` and `dev`. Tool versions
 are pinned in `requirements-dev.txt`.
 
 ---
