@@ -175,8 +175,8 @@ configs are not locked (backlog A7).
 
 ## Tests
 
-`bash lint.sh` (ruff → mypy → pytest) is the gate; CI runs it on Python 3.11
-and 3.14. `bash coverage.sh` is a report only. All tests mock the Google API,
+`bash lint.sh` (ruff → mypy → pytest) is the gate; CI runs it on Python 3.11,
+3.14 and 3.15. `bash coverage.sh` is a report only. All tests mock the Google API,
 and `tests/conftest.py` points every data path into a temp folder, so no test
 touches real files. TUI tests use Textual's headless `run_test()` through
 `mounted()` / `settle()` in `tests/test_tui.py`; see the `testing` skill.

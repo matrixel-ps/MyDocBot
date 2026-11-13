@@ -52,6 +52,11 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   Copy it to `docs_config.json`, or keep using `python main.py --add`.
 
 ### Changed
+- **Python 3.15 supported:** the dependency pins are bumped (cffi 2.1.1,
+  cryptography 50.0.2, google-auth 2.62.2, ruff 0.17.5, mypy 2.4.1, pytest
+  9.2.0 and others) so `pip install -r requirements-dev.txt` works on 3.15,
+  and CI now also tests 3.15 (3.11, 3.14, 3.15). The minimum stays 3.11.
+  pytest's async fixture loop scope is now set explicitly.
 - **One end-of-work step for AI agent sessions:** `/finish` runs lint once,
   has a `doc-keeper` subagent update the changelog, README, backlog and agent
   notes in the background, and writes the review handoff in the meantime.
