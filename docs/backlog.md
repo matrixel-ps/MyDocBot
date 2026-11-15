@@ -33,6 +33,7 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
+| B12 | **Intermittent `SSLError` on Google calls isn't retried** | open | med | S | core/google_docs.py `_api_call_with_retry` (~:114) | The bot's journal logged `Watch: can't read log — SSLError: [SSL: UNEXPECTED_EOF_WHILE_READING]` 114 times in 3 days (2026-11-12 → 2026-11-15), each a single failed poll followed by a good one, so the 3-in-a-row alert never fired. Likely a stale keep-alive HTTPS connection reused by the long-running bot. `ssl.SSLError` is an `OSError`, not a `ConnectionError`, so the retry skips it; note writes would queue it as a generic transient failure. Fix: retry `ssl.SSLError` (maybe only EOF-type) once, perhaps on a fresh connection; add a test with a fake service raising it. |
 
 ## Privacy & repo hygiene
 
