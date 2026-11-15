@@ -1,9 +1,8 @@
 # MyDocBot — Architecture
 
 How the code is put together, for anyone changing it. User-facing behavior is
-in [`README.md`](../README.md). The reasoning behind each choice, with dates,
-is in `docs/agent-notes/project-snapshot.md` ("Design Decisions") and
-`docs/agent-notes/improvement-plan.md`.
+in [`README.md`](../README.md); notable changes are in
+[`CHANGELOG.md`](../CHANGELOG.md).
 
 ## Data flow
 
@@ -228,5 +227,4 @@ touches real files. TUI tests use Textual's headless `run_test()` through
 | `test_editor.py` | `resolve_editor()` fallback chain |
 | `test_validation.py` | Input validators |
 | `test_screenshot.py` | `scripts/make_screenshot.py` runs headless into `tmp_path`; the SVG has the made-up title and pinned day labels; the fake service refuses writes |
-| `test_orient.py` | The `/task` orientation brief (`.claude/skills/task/orient.py`) on fixture docs |
 | `test_tui.py` | Both TUIs headless: commands, background calls (with `BlockingService`), status escaping, date labels, list date/time labels and preview wrapping (both apps), `/more` cache, highlight and preview after load, `/switch` and `/refresh` (both apps) |
