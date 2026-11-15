@@ -3,6 +3,7 @@ and the bot's watcher loop. The Google API is a fake keyed by doc ID; all
 data paths are in tmp_path."""
 import asyncio
 import os
+import ssl
 import stat
 from unittest.mock import patch
 
@@ -279,6 +280,24 @@ class TestPoll:
         service.docs["doc_s"] = readable(E2, E1)
         result = dw.poll(service, WATCH)
         assert result.messages == [] and "baseline" in result.logs[0]
+
+    def test_stale_connection_ssl_error_is_retried_not_a_failure(self, read_config, state_dir):
+        """B12: the bot's idle connection is closed by Google between polls; the
+        first read of the next poll raises ssl.SSLError and is retried."""
+        service = DocsService(doc_s=readable(E1))
+        dw.poll(service, WATCH)
+        eof = ssl.SSLError(1, "[SSL: UNEXPECTED_EOF_WHILE_READING] unexpected eof while reading")
+        new_text = readable(E2, E1)
+
+        def execute():
+            service.fetches.append(service._doc_id)
+            if len(service.fetches) == 2:
+                raise eof
+            return {"title": "T", **make_doc_response(new_text)}
+        service.execute = execute
+        result = dw.poll(service, WATCH)
+        assert result.logs == [] and dw.load_state()["doc_s"].get("failures") == 0
+        assert len(result.messages) == 1 and "1 new" in result.messages[0]
 
     def test_one_failing_doc_doesnt_stop_the_others(self, read_config, state_dir):
         watch = dw.WatchConfig(("standup", "other"))

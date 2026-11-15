@@ -156,6 +156,12 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   changes; `tests/test_tui.py` passes unmodified.
 
 ### Fixed
+- **Discord watcher failing on about every other check:** the bot's 5-minute
+  poll hit a connection Google had already closed and logged `Watch: can't
+  read log — SSLError` about 6 times an hour. A dropped TLS connection is now
+  retried like any other brief network error (certificate problems still fail
+  at once), so polls succeed, and a note write that hits it is sent instead of
+  queued.
 - **Read-only entries with a colon in the time were missing:** an entry
   timed `[17:33]` instead of `[17.33]` didn't show in the read-only TUI or the
   Discord change alerts. At the top of a doc it was skipped; lower down it

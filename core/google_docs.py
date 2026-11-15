@@ -2,6 +2,7 @@ import errno
 import os
 import re
 import socket
+import ssl
 import sys
 import time
 from dataclasses import dataclass
@@ -111,10 +112,19 @@ def is_offline_error(e):
     return isinstance(e, OSError) and e.errno in _OFFLINE_ERRNOS
 
 
+def is_transient_ssl_error(e):
+    """True for a TLS error on an established connection, such as
+    "UNEXPECTED_EOF_WHILE_READING" when Google has closed an idle keep-alive
+    connection (B12). httplib2 closes that connection but doesn't retry, so the
+    next attempt reconnects. A certificate failure isn't transient."""
+    return isinstance(e, ssl.SSLError) and not isinstance(e, ssl.SSLCertVerificationError)
+
+
 def _api_call_with_retry(fn, max_retries=3):
-    """Call fn(), retrying HTTP 429/5xx, ConnectionError and TimeoutError up to
-    max_retries attempts with 1 s, 2 s, ... between them (3 attempts = 3 s of
-    waiting). Offline errors (see is_offline_error) and other errors raise at once."""
+    """Call fn(), retrying HTTP 429/5xx, ConnectionError, TimeoutError and
+    transient SSL errors (see is_transient_ssl_error) up to max_retries attempts
+    with 1 s, 2 s, ... between them (3 attempts = 3 s of waiting). Offline
+    errors (see is_offline_error) and other errors raise at once."""
     for attempt in range(max_retries):
         try:
             return fn()
@@ -123,8 +133,8 @@ def _api_call_with_retry(fn, max_retries=3):
                 time.sleep(1 * (2 ** attempt))
                 continue
             raise
-        except (ConnectionError, TimeoutError):
-            if attempt < max_retries - 1:
+        except (ConnectionError, TimeoutError, ssl.SSLError) as e:
+            if attempt < max_retries - 1 and (not isinstance(e, ssl.SSLError) or is_transient_ssl_error(e)):
                 time.sleep(1 * (2 ** attempt))
                 continue
             raise
@@ -190,7 +200,8 @@ def classify_write_error(e):
         return WriteFailure("transient", f"{_TRANSIENT_MESSAGE} ({status})")
     if isinstance(e, RefreshError):
         return WriteFailure("auth", _AUTH_MESSAGE)
-    if isinstance(e, (ConnectionError, TimeoutError, TransportError, HttpLib2Error)) or is_offline_error(e):
+    if (isinstance(e, (ConnectionError, TimeoutError, TransportError, HttpLib2Error))
+            or is_offline_error(e) or is_transient_ssl_error(e)):
         return WriteFailure("transient", _TRANSIENT_MESSAGE)
     return WriteFailure("transient", f"{_TRANSIENT_MESSAGE} ({type(e).__name__}: {e})")
 
