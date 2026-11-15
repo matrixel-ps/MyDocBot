@@ -48,10 +48,14 @@ def save_tags_index(index):
     storage.write_json(TAGS_INDEX_PATH, index)  # atomic, 0600 (A6)
 
 
+def _tag_entry(timestamp, doc_id, preview):
+    return {"ts": timestamp, "doc_id": doc_id, "preview": textwrap.shorten(preview, width=80, placeholder="...")}
+
+
 def _add_note_tags(index, text, timestamp, doc_id, preview):
     """Add one entry per #tag in text to index (in place), skipping exact duplicates."""
     for tag in extract_tags(text):
-        entry = {"ts": timestamp, "doc_id": doc_id, "preview": textwrap.shorten(preview, width=80, placeholder="...")}
+        entry = _tag_entry(timestamp, doc_id, preview)
         if entry not in index.setdefault(tag, []):
             index[tag].append(entry)
 
@@ -62,6 +66,24 @@ def index_note(text, timestamp, doc_id, preview):
     with storage.locked(TAGS_INDEX_PATH):
         index = load_tags_index()
         _add_note_tags(index, text, timestamp, doc_id, preview)
+        save_tags_index(index)
+
+
+def unindex_note(text, timestamp, doc_id, preview):
+    """Remove the entries index_note() added for this note (/undo, F3). A tag left
+    with no entries is dropped."""
+    tags = extract_tags(text)
+    if not tags:
+        return
+    entry = _tag_entry(timestamp, doc_id, preview)
+    with storage.locked(TAGS_INDEX_PATH):
+        index = load_tags_index()
+        for tag in tags:
+            entries = index.get(tag, [])
+            if entry in entries:
+                entries.remove(entry)
+                if not entries:
+                    del index[tag]
         save_tags_index(index)
 
 

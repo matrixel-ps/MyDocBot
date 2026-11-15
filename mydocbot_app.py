@@ -11,7 +11,7 @@ from textual.binding import Binding
 from textual.containers import Horizontal, VerticalScroll
 from textual.widgets import Button, Label, ListItem, ListView, Static, TextArea
 
-from core import config, google_docs, notes, parser, timestamps, validation
+from core import config, google_docs, notes, parser, timestamps, undo, validation
 from core.commands import (
     QUEUE_USAGE,
     TAG_USAGE,
@@ -771,6 +771,8 @@ class MyDocBotApp(BaseNotesApp):
             self.cmd_flush()
         elif command == '/queue':
             self.cmd_queue(args)
+        elif command == '/undo':
+            self.cmd_undo()
         elif command == '/refresh':
             self.cmd_refresh()
         elif command == '/more':
@@ -1000,6 +1002,37 @@ class MyDocBotApp(BaseNotesApp):
         parser.move_pending(position, aliases[alias])
         self.update_status(f"Note #{position} now goes to '{alias}', on the next note you write or /flush.")
 
+    def cmd_undo(self):
+        """/undo (F3): remove the last note written to this doc, if it's still at the top.
+        No y/N prompt (like /queue drop): the removed text is shown in the preview."""
+        doc_id = self.current_doc_id
+        if doc_id is None:
+            self.update_status("No active document.")
+            return
+        check = undo.check_undo(doc_id)
+        if check.status != "ready":
+            self.update_status(undo.undo_message(check))
+            return
+
+        def done(result):
+            if result.status == "undone":
+                self._drop_from_cache(result.record, doc_id)
+                self.all_tags = parser.load_tags_index()
+                self.refresh_ui()
+                self._show_in_preview(f"[b]Removed your last note[/b] — its text was:\n\n"
+                                      f"[#a6e3a1]{md_escape(result.record['ts'])}[/] {md_escape(result.record['text'])}")
+            self.update_status(undo.undo_message(result))
+
+        self.run_api("undoing note", lambda: undo.undo_last(self._service, doc_id), done)
+
+    def _drop_from_cache(self, record, doc_id):
+        """Remove the undone note from the session cache (its newest copy)."""
+        self._doc_entries.clear()  # the doc changed; the next /more refetches
+        for i, n in enumerate(self.notes_cache):
+            if n["doc_id"] == doc_id and n["ts"] == record["ts"] and n["text"].strip() == record["text"].strip():
+                del self.notes_cache[i]
+                return
+
     def cmd_tag_reindex(self):
         doc_id = self.current_doc_id
         label = self.current_title or self.current_alias
@@ -1114,6 +1147,7 @@ class MyDocBotApp(BaseNotesApp):
             "  /rename <o> <n>             Rename alias\n"
             "  /current                    Show active doc\n"
             "  /edit                       Open $EDITOR\n"
+            "  /undo                       Remove your last note from this doc\n"
             "  /flush                      Retry pending offline notes\n"
             "  /queue [list]               List queued notes and why they failed\n"
             "  /queue drop <n>             Discard queued note n\n"

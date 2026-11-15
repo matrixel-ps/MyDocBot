@@ -195,6 +195,11 @@ def classify_write_error(e):
     return WriteFailure("transient", f"{_TRANSIENT_MESSAGE} ({type(e).__name__}: {e})")
 
 
+def prepended(text):
+    """The exact string try_prepend() inserts for text (what /undo removes, F3)."""
+    return f"{text}\n\n"
+
+
 def try_prepend(service, doc_id, text):
     """Prepend text at index 1. Returns None on success, or a WriteFailure."""
     try:
@@ -202,7 +207,7 @@ def try_prepend(service, doc_id, text):
             'requests': [{
                 'insertText': {
                     'location': {'index': 1},
-                    'text': f"{text}\n\n"
+                    'text': prepended(text)
                 }
             }]
         }
@@ -220,6 +225,64 @@ def try_prepend(service, doc_id, text):
 
 def prepend_text(service, doc_id, text):
     return try_prepend(service, doc_id, text) is None
+
+
+# What try_undo() reads: the revision (for writeControl) and each body element's
+# start index, so the text checked is only the run of paragraphs from index 1.
+UNDO_FIELDS = "revisionId,body/content/startIndex,body/content/paragraph/elements/textRun/content"
+
+
+def utf16_len(text):
+    """Length in UTF-16 code units, which is how Docs counts indexes (an emoji is 2)."""
+    return len(text.encode('utf-16-le')) // 2
+
+
+def _leading_text(doc):
+    """The text of the paragraphs that start at index 1, up to the first non-paragraph
+    element (a table, say). Unlike doc_text(), nothing after a table can count."""
+    out = []
+    for elem in doc.get('body', {}).get('content', []):
+        if not elem.get('startIndex'):  # the section break at index 0
+            continue
+        para = elem.get('paragraph')
+        if para is None:
+            break
+        out.extend(el['textRun'].get('content', '') for el in para.get('elements', []) if 'textRun' in el)
+    return ''.join(out)
+
+
+def try_undo(service, doc_id, written):
+    """Delete `written` from the top of the doc (F3), only if the doc still starts with
+    it. Returns "undone", "changed" (the top differs; nothing deleted), or a
+    WriteFailure. The delete requires the revision that was checked, so an edit in
+    between makes Google reject it rather than delete the wrong text."""
+    try:
+        doc = fetch_doc(service, doc_id, fields=UNDO_FIELDS)
+    except Exception as e:
+        return classify_write_error(e)
+    if not _leading_text(doc).startswith(written):
+        return "changed"
+    body = {'requests': [{'deleteContentRange': {
+        'range': {'startIndex': 1, 'endIndex': 1 + utf16_len(written)}}}]}
+    if doc.get('revisionId'):
+        body['writeControl'] = {'requiredRevisionId': doc['revisionId']}
+    try:
+        _api_call_with_retry(
+            lambda: service.documents().batchUpdate(documentId=doc_id, body=body).execute()
+        )
+        return "undone"
+    except Exception as e:
+        failure = classify_write_error(e)
+        # A stale revision is a 400. Re-check, so "someone edited it" isn't reported as
+        # "Google rejected the request".
+        if isinstance(e, HttpError) and e.resp.status == 400:
+            try:
+                if not _leading_text(fetch_doc(service, doc_id, fields=UNDO_FIELDS)).startswith(written):
+                    return "changed"
+            except Exception:
+                pass
+        print(f"Error: Failed to undo note — {failure.message}", file=sys.stderr)
+        return failure
 
 
 def doc_text(doc):

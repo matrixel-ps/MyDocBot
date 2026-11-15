@@ -30,6 +30,9 @@ def _isolate_data_dir(tmp_path, monkeypatch):
     monkeypatch.setattr('core.discord_handler.DISCORD_CONFIG_PATH', str(data_dir / 'discord_config.json'))
     monkeypatch.setattr('core.discord_handler.DISCORD_TOKEN_PATH', str(data_dir / 'discord_token'))
     monkeypatch.setattr('core.doc_watch.WATCH_STATE_PATH', str(data_dir / 'watch_state.json'))
+    # tmp_path, not data_dir: every sent note writes it, and data_dir must stay
+    # uncreated for the paths tests (first-run creation and migration).
+    monkeypatch.setattr('core.undo.LAST_WRITE_PATH', str(tmp_path / 'last_write.json'))
     return data_dir
 
 

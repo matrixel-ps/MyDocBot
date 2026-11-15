@@ -1,6 +1,7 @@
+import sys
 from dataclasses import dataclass, field
 
-from . import google_docs, parser, validation
+from . import google_docs, parser, undo, validation
 from .timestamps import TIMESTAMP_FORMAT, format_timestamp  # noqa: F401  re-exported; defined in timestamps (A1)
 
 
@@ -45,9 +46,14 @@ def submit_note(service, doc_id, text, now=None):
         return SubmitResult("queued", timestamp, flushed=flushed, queued_behind=behind,
                             failure=parser.first_pending_failure(doc_id))
 
-    failure = google_docs.try_prepend(service, doc_id, f"{timestamp} {text}")
+    entry = f"{timestamp} {text}"
+    failure = google_docs.try_prepend(service, doc_id, entry)
     if failure is None:
         parser.index_note(text, timestamp, doc_id, text)
+        try:
+            undo.record_write(doc_id, timestamp, text, google_docs.prepended(entry))  # for /undo (F3)
+        except OSError as e:  # the note is in the doc; only its undo is lost
+            print(f"Warning: Couldn't save the undo record — {e}. /undo won't find this note.", file=sys.stderr)
         return SubmitResult("sent", timestamp, flushed=flushed)
 
     parser.queue_note(text, doc_id, timestamp, failure)

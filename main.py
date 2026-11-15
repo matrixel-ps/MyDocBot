@@ -1,8 +1,8 @@
 import argparse
 import sys
 
-from core import config, google_docs, notes, parser, paths, validation
-from core.commands import dispatch, queued_message
+from core import config, google_docs, notes, parser, paths, undo, validation
+from core.commands import cmd_undo, dispatch, queued_message
 
 # One-shot exit codes. 2 is left to argparse for usage errors; 3 lets a script
 # or hotkey tell "queued offline" apart from "sent".
@@ -18,16 +18,25 @@ def _stdin_note():
     return sys.stdin.read()
 
 
-def one_shot(svc_config, alias, text):
-    """Write a single note to `alias` (or the default doc) and return an exit code."""
+def _one_shot_alias(svc_config, alias):
+    """`alias` (or the default) if it's configured, else None after printing why."""
     aliases = svc_config.get("aliases", {})
     alias = alias or svc_config.get("default", "")
     if not aliases:
         print("No documents configured. Add one with --add <alias> <doc_id>.", file=sys.stderr)
-        return EXIT_ERROR
+        return None
     if alias not in aliases:
         print(f"Alias '{alias}' not found. Available: {', '.join(aliases)}", file=sys.stderr)
+        return None
+    return alias
+
+
+def one_shot(svc_config, alias, text):
+    """Write a single note to `alias` (or the default doc) and return an exit code."""
+    alias = _one_shot_alias(svc_config, alias)
+    if alias is None:
         return EXIT_ERROR
+    aliases = svc_config["aliases"]
     service = google_docs.get_service()
     result = notes.submit_note(service, aliases[alias], text)
     if result.status == "rejected":
@@ -43,6 +52,28 @@ def one_shot(svc_config, alias, text):
     return EXIT_SENT
 
 
+def one_shot_undo(svc_config, alias):
+    """--undo (F3): remove the last note written to `alias` (or the default doc).
+    Asks y/N only when stdin is a terminal, so a script or hotkey can undo too.
+    Exit codes as for a note: 0 removed, 3 couldn't reach Google (try again),
+    1 for anything else (nothing to undo, doc changed, notes queued, canceled)."""
+    alias = _one_shot_alias(svc_config, alias)
+    if alias is None:
+        return EXIT_ERROR
+    doc_id = svc_config["aliases"][alias]
+    check = undo.check_undo(doc_id)
+    if check.status != "ready":  # decided locally: no Google sign-in needed
+        print(undo.undo_message(check), file=sys.stderr)
+        return EXIT_ERROR
+    service = google_docs.get_service()
+    result = cmd_undo(service, doc_id, confirm=sys.stdin is not None and sys.stdin.isatty())
+    if result is not None and result.status == "undone":
+        return EXIT_SENT
+    if result is not None and result.failure is not None and result.failure.kind == "transient":
+        return EXIT_QUEUED
+    return EXIT_ERROR
+
+
 def main():
     arg_parser = argparse.ArgumentParser(description="MyDocBot - terminal note-taker for Google Docs")
     arg_parser.add_argument('--doc', '-d', type=str, default=None,
@@ -55,6 +86,8 @@ def main():
                             help='Launch the rich TUI interface')
     arg_parser.add_argument('--read', '-r', nargs='?', const='', default=None,
                             help='Launch read-only TUI (optional: start alias)')
+    arg_parser.add_argument('--undo', action='store_true',
+                            help='Remove the last note written to the doc (default, or --doc) and exit')
     arg_parser.add_argument('note', nargs='*',
                             help='Write this note and exit, without the REPL. '
                                  'A note piped on stdin works the same way.')
@@ -63,8 +96,13 @@ def main():
 
     if args.note and modes:
         arg_parser.error("a note can't be combined with --tui, --read, --list, or --add")
+    if args.undo and (modes or args.note):
+        arg_parser.error("--undo can't be combined with a note, --tui, --read, --list, or --add")
 
     paths.prepare_data_dir()
+
+    if args.undo:
+        return one_shot_undo(config.load_config(), args.doc)
 
     if not modes:
         text = " ".join(args.note) if args.note else _stdin_note()

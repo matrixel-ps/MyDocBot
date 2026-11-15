@@ -7,7 +7,7 @@ import tempfile
 import textwrap
 from datetime import datetime
 
-from . import config, google_docs, notes, parser, validation
+from . import config, google_docs, notes, parser, undo, validation
 
 
 def resolve_editor():
@@ -163,6 +163,34 @@ def cmd_queue(svc_config, args):
         return
     parser.move_pending(position, aliases[alias])
     print(f"--- Note #{position} now goes to '{alias}', on the next note you write or /flush. ---")
+
+
+def cmd_undo(service, current_doc_id, confirm=True):
+    """/undo (F3): remove the last note written to this doc, if it's still at the top.
+    Asks y/N first when confirm is set. Returns the UndoResult, or None if canceled
+    or there's no active doc."""
+    if current_doc_id is None:
+        print("No active document.")
+        return None
+    check = undo.check_undo(current_doc_id)
+    if check.status != "ready":
+        print(undo.undo_message(check))
+        return check
+    record = check.record
+    assert record is not None
+    if confirm:
+        preview = textwrap.shorten(record["text"], width=40, placeholder="...")
+        answer = input(f"Remove your last note ({record['ts']} {preview}) from the doc? [y/N] ")
+        if answer.lower() != 'y':
+            print("Canceled.")
+            return None
+    result = undo.undo_last(service, current_doc_id)
+    if result.status == "undone":
+        print(f"--- {undo.undo_message(result)} Its text was: ---")
+        print(record["text"])
+    else:
+        print(undo.undo_message(result))
+    return result
 
 
 def queued_message(result):
@@ -476,6 +504,7 @@ def cmd_help():
     print("  /remove <alias>                Remove a document alias")
     print("  /rename <o> <n>                Rename an alias")
     print("  /current                       Show active document info")
+    print("  /undo                          Remove your last note from this doc (asks first)")
     print("  /flush                         Retry sending pending offline notes")
     print("  /queue [list]                  List queued notes and why they failed")
     print("  /queue drop <n>                Discard queued note n (asks first)")
@@ -545,6 +574,8 @@ def dispatch(service, svc_config, line, current_alias, current_doc_id):
         cmd_rename(svc_config, args)
     elif command == '/queue':
         cmd_queue(svc_config, args)
+    elif command == '/undo':
+        cmd_undo(service, current_doc_id)
     elif command == '/flush':
         flushed = len(parser.flush_pending_notes(service, include_permanent=True))
         pending = parser.count_pending()
