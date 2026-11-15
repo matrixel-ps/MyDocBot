@@ -1,8 +1,19 @@
 # MyDocBot
 
+[![CI](https://github.com/matrixel-ps/MyDocBot/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/matrixel-ps/MyDocBot/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
+![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)
+
 A terminal note-taker that prepends timestamped notes to Google Docs. Write from
 a quick one-line command, a line-by-line CLI, or a full-screen TUI. A separate
-read-only TUI browses docs in another format.
+read-only TUI browses docs in another format, and an optional Discord bot takes
+notes by DM and tells you when a watched doc changes.
+
+![The MyDocBot TUI: a list of notes grouped by day on the left, the selected note with its #tags on the right, and a note input at the bottom](docs/images/tui.svg)
+
+**Requirements:** Python 3.11 or newer, a Google account, and Linux or macOS.
+Windows is untested: there, the cross-process file locking (`fcntl`) is
+unavailable, so run only one MyDocBot window or bot at a time.
 
 [CHANGELOG](CHANGELOG.md) · [open work](docs/backlog.md) · [architecture](docs/architecture.md)
 
@@ -10,6 +21,7 @@ read-only TUI browses docs in another format.
 
 ## Quickstart
 
+- [ ] `git clone https://github.com/matrixel-ps/MyDocBot.git && cd MyDocBot`
 - [ ] Enable the Google Docs API and download OAuth credentials ([Setup](#setup))
 - [ ] `pipx install -e .` (or `pip install -e .` in a venv)
 - [ ] Put `credentials.json` in `~/.config/mydocbot/` (or `$MYDOCBOT_HOME`)
@@ -24,9 +36,49 @@ read-only TUI browses docs in another format.
 
 ### 1. Google credentials
 
-1. In the [Google Cloud Console](https://console.cloud.google.com), create a project and enable the **Google Docs API**.
-2. Create OAuth 2.0 credentials of type **Desktop application**.
-3. Download them as `credentials.json` into the [data directory](#data-directory).
+MyDocBot talks to Google Docs with your own Google Cloud project and OAuth
+client, so nothing goes through anyone else's servers. Setting it up takes
+about ten minutes, once. Google renames these menus from time to time; the
+[Docs API Python quickstart](https://developers.google.com/workspace/docs/api/quickstart/python)
+has the current wording.
+
+1. **Project and API.** In the [Google Cloud Console](https://console.cloud.google.com),
+   create a project (any name), then
+   [enable the Google Docs API](https://console.cloud.google.com/flows/enableapi?apiid=docs.googleapis.com)
+   for it.
+2. **Consent screen.** Go to **Menu → Google Auth platform → Branding** and
+   click **Get started**:
+   - **App information:** any app name (e.g. "MyDocBot") and your email.
+   - **Audience:** choose **External**. (**Internal** only exists for Google
+     Workspace organizations; a personal Gmail account must use External.)
+   - **Contact information:** your email. Agree to the policy and **Create**.
+3. **Add yourself as a test user.** **Google Auth platform → Audience → Test
+   users → Add users**, and add the Google account whose docs you'll use.
+4. **OAuth client.** **Google Auth platform → Clients → Create client**,
+   application type **Desktop app**, any name, **Create**. Download the JSON
+   and save it as `credentials.json` in the [data directory](#data-directory)
+   (`~/.config/mydocbot/` by default), then `chmod 600` it.
+
+**Testing or In production?** A new app is in **Testing**. That's fine for
+personal use, but Google expires a test user's sign-in after **7 days**, so
+MyDocBot will open the browser to sign in again about once a week. That
+matters most for the Discord bot, which runs unattended: once its sign-in
+expires, its Google calls fail (notes are queued) until you run `mydocbot` to
+sign in again and restart the bot. To avoid it, click **Publish app**
+on the **Audience** page. Google then shows a "Google hasn't verified this
+app" warning when you sign in (choose **Advanced**, then **Go to** your app's name); that's
+expected for an app only you use, and it doesn't need Google's review while
+it has fewer than 100 users.
+
+**What MyDocBot can access.** It asks for one permission, the
+`https://www.googleapis.com/auth/documents` scope, which Google describes as
+seeing, editing, creating and deleting all your Google Docs documents. The
+narrower `drive.file` scope only reaches files an app created or opened
+through a file picker, so it can't write to an existing doc you give by ID.
+In practice MyDocBot only opens the doc IDs you add with `--add` / `/add`,
+and the read-only TUI and the Discord watcher never write. The sign-in is
+saved in `token.json` in the data directory; revoke it any time at
+[myaccount.google.com/connections](https://myaccount.google.com/connections).
 
 ### 2. Install
 
@@ -372,8 +424,9 @@ also re-tags notes indexed before hyphens were allowed (when
   another alias (handy after fixing a wrong doc ID); it keeps its original
   time, so it can land above newer notes there.
 - **Retries:** brief Google errors (429, 5xx, dropped connections, including
-  dropped TLS ones) get up to 3 attempts, 1 s then 2 s apart. "No network" errors (no DNS, no route)
-  queue the note at once, so writing offline stays instant.
+  dropped TLS ones) get up to 3 attempts, 1 s then 2 s apart. "No network"
+  errors (no DNS, no route) queue the note at once, so writing offline stays
+  instant.
 
 **Loading and searching.**
 - **Every load downloads the whole doc**, since the Google Docs API can't
@@ -424,7 +477,9 @@ The TUI uses a dark, Catppuccin-inspired theme.
 │                         timestamps, config, storage, paths, validation, commands,
 │                         discord_handler
 ├── tests/                One test_*.py per area; conftest.py isolates all data paths
-├── docs/                 architecture.md, backlog.md, task sheets, agent notes
+├── docs/                 architecture.md, backlog.md, task sheets, agent notes,
+│                         images/ (README screenshot)
+├── scripts/              make_screenshot.py: regenerates docs/images/tui.svg
 ├── docs_config.example.json
 ├── pyproject.toml        Package, entry points, `discord` extra; ruff, mypy, pytest, coverage config
 ├── requirements.txt      Runtime dependencies, pinned

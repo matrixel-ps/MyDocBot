@@ -7,6 +7,13 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
 ## [Unreleased]
 
 ### Added
+- **README for first-time users:** a screenshot of the TUI, CI / license /
+  Python badges, a requirements line (Python 3.11+, Linux or macOS), and
+  `git clone` as the first Quickstart step. The Google credentials section now
+  walks through the whole setup: project, consent screen, test user, Desktop
+  client. It explains that an app left in Testing mode signs you out every 7
+  days (which matters most for the Discord bot) and how to publish the app to
+  avoid it, and what the `documents` permission allows.
 - **MIT license:** a `LICENSE` file, and the package metadata now has the
   license, author and project links (repo, issues).
 - **`/undo` for the last note:** remove the note you just wrote (a typo, the
