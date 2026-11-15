@@ -43,7 +43,7 @@ newest first. That's why queued notes must be written *before* a new one.
 | `paths.py` | Where the data lives; first-run migration | `resolve_data_dir()`, `data_path()`, `prepare_data_dir()` |
 | `validation.py` | Input guards | `validate_doc_id()`, `validate_alias()`, `validate_config()`, `validate_note()`, `validate_history_size()` |
 | `discord_handler.py` | What the Discord bot does with a DM (no discord import) | `load_token()`, `load_discord_config()`, `load_allowed_users()`, `is_allowed()`, `split_alias()`, `write_note()` |
-| `doc_watch.py` | Watch read-only docs: config, hash snapshots, diff, alert text (no discord import) | `parse_watch_config()`, `poll()` → `PollResult`, `snapshot()`, `diff()`, `format_changes()` |
+| `doc_watch.py` | Watch read-only docs: config, text snapshots, diff, word diff, alert text (no discord import) | `parse_watch_config()`, `poll()` → `PollResult`, `snapshot()`, `diff()`, `word_diff()`, `format_changes()` (returns a list of messages) |
 | `commands.py` | CLI command handlers, plus text shared with the TUI | `dispatch()`, `cmd_*()`, `queued_text()`, `queue_lines()`, `reindex_message()`, `resolve_editor()`, `export_to_markdown()` |
 
 `main.py` parses arguments, prepares the data dir, and runs one-shot
@@ -59,7 +59,9 @@ process (`on_ready` repeats on reconnect). Every `interval_minutes` it runs
 each allowed user. `poll()` re-resolves the aliases from `read_config.json`,
 fetches each doc (`fetch_doc`, title + text) and parses it with
 `parse_entries_readable()`. A new doc ID becomes a silent baseline; a changed
-text hash is diffed by entry. A doc that suddenly parses to zero entries
+text hash is diffed by entry (`Change.old` carries the previous text, so
+`word_diff()` can mark edits). `format_changes()` returns a list of messages,
+each under `DISCORD_MESSAGE_LIMIT`; `run_watcher` sends them all. A doc that suddenly parses to zero entries
 keeps its snapshot, like `/tag reindex`. There is no cheaper change check: the
 Docs API fills in `revisionId` only for editors, and Drive's `modifiedTime`
 would need another OAuth scope.
@@ -134,12 +136,13 @@ text, `0600`) or `$MYDOCBOT_DISCORD_TOKEN`:
 ```
 
 `watch_state.json` is written only by the watcher. It maps a doc ID to a
-16-hex-character sha256 of the whitespace-collapsed text and of each entry's
-body, keyed by timestamp (`#2`, `#3` for repeats), plus a failure count. It
-never holds note text. Corrupt → quarantined, and the docs are re-baselined.
+16-hex-character sha256 of the whitespace-collapsed doc text, plus each
+entry's body text keyed by timestamp (`#2`, `#3` for repeats), and a failure
+count. Older files hold a hash string per entry; those are replaced silently
+on the next poll. Written atomically, 0600 (decision 57). Corrupt → quarantined, and the docs are re-baselined.
 
 ```json
-{"doc_s": {"text_hash": "…", "entries": {"[10/24/2026] [14.30]|": "…"}, "failures": 0}}
+{"doc_s": {"text_hash": "…", "entries": {"[10/24/2026] [14.30]|": {"text": "…"}}, "failures": 0}}
 ```
 
 **Locking (A6):** every load-modify-save of `pending_queue.json` and
@@ -192,7 +195,7 @@ touches real files. TUI tests use Textual's headless `run_test()` through
 | `test_storage.py` | Atomic writes: readers never see a truncated file; `0600` |
 | `test_locking.py` | `storage.locked()`; concurrent processes/threads lose no queue or tag update; flush exclusivity and reconcile |
 | `test_discord.py` | Discord bot: alias prefix, allowlist, token/allowlist loading, `write_note`, `NoteBot` with fake messages, `main()` exit codes |
-| `test_doc_watch.py` | Doc watcher: config, diff, message limits, `poll()` (baseline, changes, errors and recovery, retargets, state file), `run_watcher` loop |
+| `test_doc_watch.py` | Doc watcher: config, diff (old text, legacy hash snapshots), word diff, message splitting and limits, `poll()` (baseline, changes, errors and recovery, retargets, state file), `run_watcher` loop |
 | `test_corrupt_backup.py` | Corrupt files moved to timestamped backups; unreadable files left alone |
 | `test_paths.py` | Data-dir resolution and one-time migration |
 | `test_commands.py` | CLI commands, including `/queue`, `/search`, `/tag reindex`, `/export` |

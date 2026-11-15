@@ -2,7 +2,6 @@
 and the bot's watcher loop. The Google API is a fake keyed by doc ID; all
 data paths are in tmp_path."""
 import asyncio
-import json
 import os
 import stat
 from unittest.mock import patch
@@ -99,14 +98,14 @@ class TestDiff:
     def entries(self, *raw):
         return [(f"[{d}] [{t}]|", b) for d, t, b in raw]
 
-    def test_new_edited_removed(self):
+    def test_new_edited_removed_carry_old_text(self):
         old = dw.snapshot(self.entries(E2, E1), "x")
         e3 = ("10/25/2026", "08.00", "brand new")
         changes = dw.diff(old, self.entries(e3, ("10/24/2026", "14.30", "Deployed v2")))
-        assert [(c.kind, c.ts, c.body) for c in changes] == [
-            ("new", "[10/25/2026] [08.00]|", "brand new"),
-            ("edited", "[10/24/2026] [14.30]|", "Deployed v2"),
-            ("removed", "[10/23/2026] [09.00]|", None),
+        assert [(c.kind, c.ts, c.body, c.old) for c in changes] == [
+            ("new", "[10/25/2026] [08.00]|", "brand new", None),
+            ("edited", "[10/24/2026] [14.30]|", "Deployed v2", "Deployed the new build"),
+            ("removed", "[10/23/2026] [09.00]|", None, "older entry"),
         ]
 
     def test_whitespace_only_edit_is_not_a_change(self):
@@ -119,32 +118,83 @@ class TestDiff:
         [change] = dw.diff(old, twins)
         assert (change.kind, change.body) == ("new", "b")
 
-    def test_snapshot_holds_no_note_text(self):
-        snap = dw.snapshot(self.entries(E2), "secret text")
-        assert "Deployed" not in json.dumps(snap) and "secret" not in json.dumps(snap)
+    def test_snapshot_keeps_entry_text(self):
+        snap = dw.snapshot(self.entries(E2), "x")
+        assert snap["entries"] == {"[10/24/2026] [14.30]|": {"text": "Deployed the new build"}}
+        assert not dw.has_legacy_entries(snap)
+
+    def test_legacy_hash_only_snapshot_still_compares(self):
+        legacy = {"text_hash": "x", "entries": {
+            "[10/24/2026] [14.30]|": dw._hash("Deployed the new build"),
+            "[10/23/2026] [09.00]|": dw._hash("older entry")}}
+        assert dw.has_legacy_entries(legacy)
+        assert dw.diff(legacy, self.entries(E2, E1)) == []  # no flood of "edited"
+        changes = dw.diff(legacy, self.entries(("10/24/2026", "14.30", "Deployed v2")))
+        assert [(c.kind, c.old) for c in changes] == [("edited", None), ("removed", None)]
+
+
+class TestWordDiff:
+    def test_replaced_and_added_words(self):
+        assert dw.word_diff("Call the dentist on Tuesday", "Call the dentist on Thursday at 3pm") == (
+            "Call the dentist on ~~Tuesday~~ **Thursday at 3pm**")
+
+    def test_deleted_words(self):
+        assert dw.word_diff("buy milk and eggs today", "buy milk today") == "buy milk ~~and eggs~~ today"
+        assert dw.word_diff("buy milk today", "buy milk") == "buy milk ~~today~~"
+
+    def test_new_line_breaks_kept_and_markers_dont_span_them(self):
+        assert dw.word_diff("one\ntwo", "one\nnew line\nand more\ntwo") == (
+            "one\n**new line**\n**and more**\ntwo")
+
+    def test_markdown_in_notes_is_escaped(self):
+        assert dw.word_diff("a *b*", "a *b* c_d") == "a \\*b\\* **c\\_d**"
 
 
 class TestFormatChanges:
-    def test_message_lines(self):
-        changes = [dw.Change("new", "[10/24/2026] [14.30]|", "Deployed"),
+    def test_full_text_diff_removed_text_and_link(self):
+        changes = [dw.Change("new", "[10/24/2026] [14.30]|", "Deployed\nsecond line"),
+                   dw.Change("edited", "[10/24/2026] [10.00]|", "meet at 3", "meet at 2"),
+                   dw.Change("removed", "[10/23/2026] [09.00]|", old="gone now")]
+        assert dw.format_changes("standup", "Team Log", changes, "doc_s") == [
+            '📄 standup ("Team Log"): 1 new, 1 edited, 1 removed\n'
+            "<https://docs.google.com/document/d/doc_s>\n\n"
+            "🆕 10/24/2026 [14.30]\n> Deployed\n> second line\n\n"
+            "✏️ edited 10/24/2026 [10.00]\n> meet at ~~2~~ **3**\n\n"
+            "🗑️ removed 10/23/2026 [09.00]\n> gone now"]
+
+    def test_without_stored_text(self):
+        changes = [dw.Change("edited", "[10/24/2026] [10.00]|", "meet at 3"),
                    dw.Change("removed", "[10/23/2026] [09.00]|")]
-        assert dw.format_changes("standup", "Team Log", changes) == (
-            '📄 standup ("Team Log"): 1 new, 1 removed\n'
-            "🆕 10/24/2026 [14.30] — Deployed\n"
-            "🗑️ removed 10/23/2026 [09.00]")
+        assert dw.format_changes("standup", None, changes) == [
+            "📄 standup: 1 edited, 1 removed\n\n"
+            "✏️ edited 10/24/2026 [10.00] (previous text wasn't stored)\n> meet at 3\n\n"
+            "🗑️ removed 10/23/2026 [09.00]"]
 
-    def test_many_changes_are_capped(self):
-        changes = [dw.Change("new", f"[10/{d:02}/2026] [10.00]|", "x") for d in range(1, 9)]
-        message = dw.format_changes("standup", None, changes)
-        assert message.startswith("📄 standup: 8 new")
-        assert message.count("🆕") == dw.MAX_LISTED
-        assert message.endswith(f"…and {8 - dw.MAX_LISTED} more")
+    def test_every_change_listed(self):
+        changes = [dw.Change("new", f"[10/{d:02}/2026] [10.00]|", f"note {d}") for d in range(1, 9)]
+        [message] = dw.format_changes("standup", None, changes)
+        assert message.count("🆕") == 8 and "more" not in message
 
-    def test_long_bodies_stay_under_discord_limit(self):
-        changes = [dw.Change("new", "[10/24/2026] [14.30]|", "word " * 2000)] * 10
-        message = dw.format_changes("standup", "T" * 500, changes)
-        assert len(message) <= dw.DISCORD_MESSAGE_LIMIT
-        assert "…" in message
+    def test_long_output_is_split_not_cut(self):
+        bodies = [" ".join(f"w{n}-{i}" for i in range(400)) for n in range(4)]  # ~2.5k chars each
+        changes = [dw.Change("new", "[10/24/2026] [14.30]|", b) for b in bodies]
+        messages = dw.format_changes("standup", "T", changes, "doc_s")
+        assert len(messages) > 4
+        assert all(len(m) <= dw.DISCORD_MESSAGE_LIMIT for m in messages)
+        text = " ".join(messages).replace("> ", " ")
+        words = text.split()
+        for n in range(4):  # nothing lost, order kept
+            expected = [f"w{n}-{i}" for i in range(400)]
+            got = [w for w in words if w.startswith(f"w{n}-")]
+            assert got == expected
+        assert all(line.startswith("> ") for m in messages for line in m.split("\n") if line.startswith("w"))
+        assert not any(line.startswith("w") for m in messages for line in m.split("\n"))
+
+    def test_word_longer_than_a_message_is_split(self):
+        changes = [dw.Change("new", "[10/24/2026] [14.30]|", "x" * 5000)]
+        messages = dw.format_changes("standup", None, changes, limit=500)
+        assert all(len(m) <= 500 for m in messages)
+        assert "".join(messages).count("x") == 5000
 
 
 class TestPoll:
@@ -159,7 +209,9 @@ class TestPoll:
         dw.poll(service, WATCH)
         service.docs["doc_s"] = readable(E2, E1)
         result = dw.poll(service, WATCH)
-        assert result.messages == ['📄 standup ("Title doc_s"): 1 new\n🆕 10/24/2026 [14.30] — Deployed the new build']
+        assert result.messages == ['📄 standup ("Title doc_s"): 1 new\n'
+                                   "<https://docs.google.com/document/d/doc_s>\n\n"
+                                   "🆕 10/24/2026 [14.30]\n> Deployed the new build"]
 
     def test_no_change_and_formatting_only_change_are_quiet(self, read_config, state_dir):
         service = DocsService(doc_s=readable(E2, E1))
@@ -175,8 +227,28 @@ class TestPoll:
         service.docs["doc_s"] = readable(("10/24/2026", "14.30", "Deployed v2"))
         [message] = dw.poll(service, WATCH).messages
         assert "1 edited, 1 removed" in message
-        assert "✏️ edited 10/24/2026 [14.30] — Deployed v2" in message
-        assert "🗑️ removed 10/23/2026 [09.00]" in message
+        assert "✏️ edited 10/24/2026 [14.30]\n> Deployed ~~the new build~~ **v2**" in message
+        assert "🗑️ removed 10/23/2026 [09.00]\n> older entry" in message
+
+    def test_long_change_sends_several_messages(self, read_config, state_dir):
+        service = DocsService(doc_s=readable(E1))
+        dw.poll(service, WATCH)
+        service.docs["doc_s"] = readable(("10/24/2026", "14.30", "word " * 1000), E1)
+        messages = dw.poll(service, WATCH).messages
+        assert len(messages) == 3 and all(len(m) <= dw.DISCORD_MESSAGE_LIMIT for m in messages)
+
+    def test_legacy_state_gets_text_silently_then_diffs(self, read_config, state_dir):
+        service = DocsService(doc_s=readable(E2, E1))
+        dw.poll(service, WATCH)
+        state = dw.load_state()
+        state["doc_s"]["entries"] = {k: dw._hash(v["text"]) for k, v in state["doc_s"]["entries"].items()}
+        dw.save_state(state)  # as written before entry text was kept
+        result = dw.poll(service, WATCH)
+        assert result.messages == [] and result.logs == ["Watch: stored entry text for standup."]
+        assert not dw.has_legacy_entries(dw.load_state()["doc_s"])
+        service.docs["doc_s"] = readable(("10/24/2026", "14.30", "Deployed v2"), E1)
+        [message] = dw.poll(service, WATCH).messages
+        assert "~~the new build~~ **v2**" in message
 
     def test_doc_that_parses_to_nothing_keeps_the_snapshot(self, read_config, state_dir):
         service = DocsService(doc_s=readable(E2, E1))

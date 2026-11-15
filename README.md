@@ -61,7 +61,7 @@ files by hand.
 | `pending_queue.json` | A write that couldn't be sent | Notes waiting to be written |
 | `discord_token` | You (Discord Developer Portal) | Bot token, only for the [Discord bot](#discord-bot) |
 | `discord_config.json` | You | Discord user IDs the bot obeys; optional docs to watch |
-| `watch_state.json` | The bot's watcher | Last seen state of each watched doc (hashes only, no note text) |
+| `watch_state.json` | The bot's watcher | Last seen text of each watched doc (kept so edits can be shown as a diff) |
 
 ### 3. Add a document
 
@@ -191,8 +191,13 @@ edited or removed:
 
 ```
 📄 standup ("Team Standup Log"): 1 new, 1 edited
-🆕 10/25/2026 [09.15] — Deployed the new build to staging
-✏️ edited 10/24/2026 [14.30] — Rollback done, all green
+<https://docs.google.com/document/d/…>
+
+🆕 10/25/2026 [09.15]
+> Deployed the new build to staging
+
+✏️ edited 10/24/2026 [14.30]
+> Rollback ~~in progress~~ **done, all green**
 ```
 
 Add a `watch` block to `discord_config.json` and restart the bot:
@@ -207,15 +212,21 @@ Add a `watch` block to `discord_config.json` and restart the bot:
   changed doc ID in `--read` applies without a restart.
 - `interval_minutes` is optional: 5 by default, at least 1.
 - **First check:** a newly watched doc is only recorded, so you don't get its
-  whole history. After that, each check that finds changes sends one message
-  (up to 5 entries listed, then "…and N more").
+  whole history. After that, each check that finds changes sends a header
+  with a link to the doc, then the full text of each new entry, a word diff
+  for each edited one (~~removed~~ words and **added** words), and the text
+  of each removed entry. Long output is split across several messages, never
+  cut off.
 - **Quiet changes:** edits that don't touch an entry (a header, formatting,
   re-wrapped lines) send nothing.
 - **Errors:** if a doc can't be read, it's retried on the next check, with no
   false alerts. After 3 failed checks in a row you get one warning, and one
   more when it's readable again.
-- **Read-only:** the watcher only reads the docs. It keeps a fingerprint of
-  each entry in `watch_state.json`, not the text.
+- **Read-only:** the watcher only reads the docs. It keeps the last seen text
+  of each entry in `watch_state.json` (in the data directory, owner-only
+  permissions, never in git) to show what changed. A `watch_state.json` from
+  an older version is upgraded silently on the next check, with no flood of
+  "edited" alerts.
 
 ### CLI
 

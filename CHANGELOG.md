@@ -52,6 +52,14 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   Copy it to `docs_config.json`, or keep using `python main.py --add`.
 
 ### Changed
+- **Watch alerts show what changed:** the DM now has a link to the doc, the
+  full text of each new entry, a word diff for each edited entry (~~removed~~
+  words and **added** words) and the text of each removed entry. Long alerts
+  are split across several messages instead of cut off after 5 entries. To
+  do this the watcher now keeps the last seen text of each entry in
+  `watch_state.json` (data directory, owner-only permissions, not in git)
+  instead of fingerprints. An existing `watch_state.json` is upgraded
+  silently on the next check.
 - **Python 3.15 supported:** the dependency pins are bumped (cffi 2.1.1,
   cryptography 50.0.2, google-auth 2.62.2, ruff 0.17.5, mypy 2.4.1, pytest
   9.2.0 and others) so `pip install -r requirements-dev.txt` works on 3.15,
