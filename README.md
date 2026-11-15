@@ -371,8 +371,8 @@ also re-tags notes indexed before hyphens were allowed (when
 - **`/queue`** shows each note's last error. `/queue move` sends a note to
   another alias (handy after fixing a wrong doc ID); it keeps its original
   time, so it can land above newer notes there.
-- **Retries:** brief Google errors (429, 5xx, dropped connections) get up
-  to 3 attempts, 1 s then 2 s apart. "No network" errors (no DNS, no route)
+- **Retries:** brief Google errors (429, 5xx, dropped connections, including
+  dropped TLS ones) get up to 3 attempts, 1 s then 2 s apart. "No network" errors (no DNS, no route)
   queue the note at once, so writing offline stays instant.
 
 **Loading and searching.**

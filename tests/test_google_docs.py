@@ -5,6 +5,7 @@ CREDENTIALS_PATH point into tmp_path, so no real OAuth runs and the real
 token.json is never read or written.
 """
 import os
+import ssl
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -197,6 +198,57 @@ class TestOfflineErrorMessages:
     ])
     def test_is_offline_error(self, error, expected):
         assert google_docs.is_offline_error(error) is expected
+
+
+class TestSSLErrorRetry:
+    """B12: Google closes an idle keep-alive connection; the next call reads EOF
+    and raises a plain ssl.SSLError. It is retried on a fresh connection."""
+
+    EOF = ssl.SSLError(1, "[SSL: UNEXPECTED_EOF_WHILE_READING] unexpected eof while reading")
+
+    def _fn(self, *outcomes):
+        calls = iter(outcomes)
+
+        def fn():
+            outcome = next(calls)
+            if isinstance(outcome, Exception):
+                raise outcome
+            return outcome
+        return fn
+
+    def test_ssl_error_then_success_is_retried(self):
+        with patch('core.google_docs.time.sleep') as sleep:
+            assert google_docs._api_call_with_retry(self._fn(self.EOF, "doc")) == "doc"
+        assert sleep.call_count == 1
+
+    def test_ssl_error_every_time_raises_after_max_retries(self):
+        fn = MagicMock(side_effect=self.EOF)
+        with patch('core.google_docs.time.sleep') as sleep, pytest.raises(ssl.SSLError):
+            google_docs._api_call_with_retry(fn, max_retries=3)
+        assert fn.call_count == 3 and sleep.call_count == 2
+
+    def test_certificate_error_is_not_retried(self):
+        fn = MagicMock(side_effect=ssl.SSLCertVerificationError(1, "certificate verify failed"))
+        with patch('core.google_docs.time.sleep') as sleep, pytest.raises(ssl.SSLCertVerificationError):
+            google_docs._api_call_with_retry(fn)
+        assert fn.call_count == 1 and sleep.call_count == 0
+
+    def test_write_retries_ssl_error(self):
+        service = MagicMock()
+        service.documents.return_value.batchUpdate.return_value.execute.side_effect = [self.EOF, {}]
+        with patch('core.google_docs.time.sleep'):
+            assert google_docs.try_prepend(service, "doc", "text") is None
+
+    def test_write_failure_message_is_plain(self):
+        assert google_docs.classify_write_error(self.EOF) == google_docs.WriteFailure(
+            "transient", "offline or Google unavailable")
+
+    @pytest.mark.parametrize("error,expected", [
+        (EOF, True), (ssl.SSLEOFError(8, "EOF occurred in violation of protocol"), True),
+        (ssl.SSLCertVerificationError(1, "bad cert"), False), (ConnectionError("x"), False),
+    ])
+    def test_is_transient_ssl_error(self, error, expected):
+        assert google_docs.is_transient_ssl_error(error) is expected
 
 
 class TestFieldMasks:
