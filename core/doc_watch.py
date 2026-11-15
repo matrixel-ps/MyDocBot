@@ -5,13 +5,17 @@ import. The Docs API can't push changes to a desktop app, and revisionId is
 only filled in for editors, so each poll fetches the doc (title + text only)
 and compares its entries with the last snapshot.
 
-Snapshots hold hashes, never note text: watch_state.json maps a doc ID to a
-hash per entry, keyed by its timestamp. The first poll of a doc is a silent
+watch_state.json maps a doc ID to each entry's text, keyed by its timestamp,
+so an edit can be shown as a word diff and a removal with what was removed.
+State written before that held only a hash per entry; it is still compared,
+and is replaced by text on the next poll. The first poll of a doc is a silent
 baseline, and an error never replaces a snapshot or sends a change.
 """
+import difflib
 import hashlib
 import json
 import os
+import re
 import sys
 from dataclasses import dataclass, field
 
@@ -25,10 +29,13 @@ DEFAULT_INTERVAL_MINUTES = 5
 MIN_INTERVAL_MINUTES = 1
 # A doc that fails this many polls in a row gets one alert (and one when it recovers).
 FAILURE_ALERT_AFTER = 3
-# Discord rejects longer messages; previews and the entry count keep well under it.
+# Discord rejects longer messages; format_changes() splits across several.
 DISCORD_MESSAGE_LIMIT = 2000
-PREVIEW_CHARS = 200
-MAX_LISTED = 5
+# Error text in the log and in alerts is cut to this.
+ERROR_CHARS = 200
+DOC_URL = "https://docs.google.com/document/d/{}"
+# A long entry fills the rest of a message only if at least this much room is left.
+MIN_SPLIT_ROOM = 80
 
 
 @dataclass(frozen=True)
@@ -79,19 +86,37 @@ def _keyed(entries):
 
 
 def snapshot(entries, text):
-    return {"text_hash": _hash(text), "entries": {key: _hash(body) for key, _, body in _keyed(entries)}}
+    return {"text_hash": _hash(text), "entries": {key: {"text": body} for key, _, body in _keyed(entries)}}
+
+
+def has_legacy_entries(old):
+    """True for a snapshot written before entry text was kept (a hash string per entry)."""
+    return any(isinstance(v, str) for v in old.get("entries", {}).values())
+
+
+def _old_text(value):
+    """The stored text of a snapshot entry, or None for a legacy hash-only one."""
+    return value.get("text") if isinstance(value, dict) else None
+
+
+def _same(value, body):
+    old = _old_text(value)
+    if old is None:
+        return value == _hash(body)
+    return " ".join(old.split()) == " ".join(body.split())
 
 
 @dataclass
 class Change:
     kind: str  # "new", "edited" or "removed"
     ts: str
-    body: str | None = None  # the current text; None for "removed" (only its hash was kept)
+    body: str | None = None  # the current text; None for "removed"
+    old: str | None = None   # the previous text (edited, removed); None if only a hash was kept
 
 
 def diff(old, entries):
     """Changes from the snapshot `old` to `entries`, new and edited in doc
-    order, then removed."""
+    order, then removed. Whitespace-only edits aren't changes."""
     old_entries = old.get("entries", {})
     changes = []
     current = set()
@@ -99,11 +124,11 @@ def diff(old, entries):
         current.add(key)
         if key not in old_entries:
             changes.append(Change("new", ts, body))
-        elif old_entries[key] != _hash(body):
-            changes.append(Change("edited", ts, body))
-    for key in old_entries:
+        elif not _same(old_entries[key], body):
+            changes.append(Change("edited", ts, body, _old_text(old_entries[key])))
+    for key, value in old_entries.items():
         if key not in current:
-            changes.append(Change("removed", key.split("#")[0]))
+            changes.append(Change("removed", key.split("#")[0], old=_old_text(value)))
     return changes
 
 
@@ -113,29 +138,122 @@ def _when(ts):
     return f"{date.lstrip('[')} {time}".strip()
 
 
-def _preview(body):
-    flat = " ".join(body.split())
-    return flat if len(flat) <= PREVIEW_CHARS else flat[:PREVIEW_CHARS - 1] + "…"
+_MARKDOWN = re.compile(r"([\\*_~`|])")
+
+
+def _escape(text):
+    """Note text shown literally, not as Discord markdown."""
+    return _MARKDOWN.sub(r"\\\1", text)
+
+
+def _quote(text):
+    return "\n".join(f"> {line}" for line in text.split("\n"))
+
+
+def _mark(text, marker):
+    """Wrap each line of `text` separately, so markdown never spans a line break
+    (or a message split)."""
+    return "\n".join(f"{marker}{line.strip()}{marker}" if line.strip() else line for line in text.split("\n"))
+
+
+def word_diff(old, new):
+    """The new text with removed words as ~~strikethrough~~ and added words in
+    **bold**. Words are compared ignoring whitespace; the new text's line
+    breaks are kept."""
+    old_words = old.split()
+    new_tokens = re.findall(r"(\S+)(\s*)", new.strip())
+    new_words = [w for w, _ in new_tokens]
+
+    def new_text(j1, j2):
+        return "".join(_escape(w) + ws for w, ws in new_tokens[j1:j2])
+
+    out = []
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, old_words, new_words, autojunk=False).get_opcodes():
+        if tag == "equal":
+            out.append(new_text(j1, j2))
+            continue
+        if tag in ("delete", "replace"):
+            if out and not out[-1][-1:].isspace():
+                out.append(" ")
+            out.append(_mark(_escape(" ".join(old_words[i1:i2])), "~~") + " ")
+        if tag in ("insert", "replace"):
+            added = new_text(j1, j2)
+            trailing = new_tokens[j2 - 1][1]
+            out.append(_mark(added[:len(added) - len(trailing)], "**") + trailing)
+    return "".join(out).rstrip()
 
 
 _LABELS = {"new": "🆕", "edited": "✏️ edited", "removed": "🗑️ removed"}
 
 
-def format_changes(alias, title, changes):
-    """One Discord message for one doc's changes, under the length limit."""
+def _change_block(change):
+    head = f"{_LABELS[change.kind]} {_when(change.ts)}"
+    if change.kind == "new":
+        text = _escape(change.body or "")
+    elif change.kind == "edited" and change.old is not None:
+        text = word_diff(change.old, change.body or "")
+    elif change.kind == "edited":
+        head += " (previous text wasn't stored)"
+        text = _escape(change.body or "")
+    elif change.old is not None:
+        text = _escape(change.old)
+    else:
+        return head
+    return f"{head}\n{_quote(text)}" if text.strip() else head
+
+
+def _cut(line, room, prefix):
+    """Where to cut `line` to fit `room` chars: the last space that fits (not
+    inside the "> " quote prefix), else exactly at `room`."""
+    cut = line.rfind(" ", len(prefix) + 1, room + 1)
+    return cut if cut > 0 else room
+
+
+def _pack(blocks, limit):
+    """Join blocks with blank lines into as few messages as fit under `limit`.
+    A block that fits in one message is never split; a longer one fills the
+    current message and carries on in the next, split on line breaks, then
+    spaces, then anywhere. A quoted line stays quoted on every piece."""
+    messages = []
+    current = ""
+    for block in blocks:
+        if current and len(current) + 2 + len(block) <= limit:
+            current += "\n\n" + block
+            continue
+        if len(block) <= limit:
+            if current:
+                messages.append(current)
+            current = block
+            continue
+        for i, line in enumerate(block.split("\n")):
+            sep = ("\n\n" if i == 0 else "\n") if current else ""
+            prefix = "> " if line.startswith("> ") else ""
+            while True:
+                room = limit - len(current) - len(sep)
+                if len(line) <= room:
+                    current += sep + line
+                    break
+                if room >= MIN_SPLIT_ROOM or not current:
+                    cut = _cut(line, room, prefix)
+                    current += sep + line[:cut]
+                    line = prefix + line[cut:].lstrip(" ")
+                messages.append(current)
+                current, sep = "", ""
+    if current:
+        messages.append(current)
+    return messages
+
+
+def format_changes(alias, title, changes, doc_id=None, limit=DISCORD_MESSAGE_LIMIT):
+    """Discord messages for one doc's changes: a header (counts and a doc
+    link), then every change in full, split across messages under `limit`."""
     counts = [f"{n} {kind}" for kind in ("new", "edited", "removed")
               if (n := sum(c.kind == kind for c in changes))]
     name = f'{alias} ("{title}")' if title else alias
-    lines = [f"📄 {name}: {', '.join(counts)}"]
-    for change in changes[:MAX_LISTED]:
-        line = f"{_LABELS[change.kind]} {_when(change.ts)}"
-        if change.body is not None:
-            line += f" — {_preview(change.body)}"
-        lines.append(line)
-    if len(changes) > MAX_LISTED:
-        lines.append(f"…and {len(changes) - MAX_LISTED} more")
-    message = "\n".join(lines)
-    return message if len(message) <= DISCORD_MESSAGE_LIMIT else message[:DISCORD_MESSAGE_LIMIT - 1] + "…"
+    header = f"📄 {name}: {', '.join(counts)}"
+    if doc_id:
+        header += f"\n<{DOC_URL.format(doc_id)}>"  # <> stops Discord's link preview
+    return _pack([header] + [_change_block(c) for c in changes], limit)
 
 
 def load_state():
@@ -164,7 +282,7 @@ class PollResult:
 
 def _short_error(e):
     text = f"{type(e).__name__}: {e}"
-    return text if len(text) <= PREVIEW_CHARS else text[:PREVIEW_CHARS - 1] + "…"
+    return text if len(text) <= ERROR_CHARS else text[:ERROR_CHARS - 1] + "…"
 
 
 def _check_doc(service, alias, doc_id, entry, result):
@@ -190,6 +308,9 @@ def _check_doc(service, alias, doc_id, entry, result):
         result.logs.append(f"Watch: baseline for {alias} ({len(entries)} entries).")
         return
     if entry["text_hash"] == _hash(text):
+        if has_legacy_entries(entry):  # state from before text was kept: store it now, silently
+            entry.update(snapshot(entries, text))
+            result.logs.append(f"Watch: stored entry text for {alias}.")
         return
     if not entries and entry["entries"]:
         # Like /tag reindex: a doc that suddenly parses to nothing is more
@@ -199,7 +320,7 @@ def _check_doc(service, alias, doc_id, entry, result):
     changes = diff(entry, entries)
     entry.update(snapshot(entries, text))
     if changes:
-        result.messages.append(format_changes(alias, doc.get("title"), changes))
+        result.messages.extend(format_changes(alias, doc.get("title"), changes, doc_id))
 
 
 def poll(service, watch):
