@@ -806,3 +806,94 @@ async def test_list_fetches_titles_with_title_mask(tmp_config_path, sample_confi
         await settle(app, pilot)
     # the startup fetch cached log's title; the other two aliases need a title-only fetch
     assert service.fields == [google_docs.TITLE_FIELDS, google_docs.TITLE_FIELDS]
+
+
+# ---- B14: the list rebuild settles before the selection and preview are set ----
+
+# Two docs per format, newest first. Doc "a" has 2 days, so its list starts
+# with a separator; doc "b" has fewer items than "a".
+_WRITE_DOCS = {
+    "doc_a": "[11/14/26] (16:45)| A newest\n\n[11/14/26] (10:00)| A second\n\n[11/13/26] (09:00)| A third\n\n",
+    "doc_b": "[11/10/26] (08:00)| B newest\n\n[11/09/26] (08:00)| B second\n\n",
+}
+_READ_DOCS = {
+    "doc_a": "11/14/2026\n[16.45]\nA newest\n\n11/14/2026\n[10.00]\nA second\n\n11/13/2026\n[09.00]\nA third\n",
+    "doc_b": "11/10/2026\n[08.00]\nB newest\n\n11/09/2026\n[08.00]\nB second\n",
+}
+
+
+class TwoDocService:
+    """Docs service fake: get() returns the doc text for its documentId."""
+
+    def __init__(self, docs):
+        self.docs = docs
+        self._doc_id = None
+
+    def documents(self):
+        return self
+
+    def get(self, documentId=None, fields=None):
+        self._doc_id = documentId
+        return self
+
+    def execute(self):
+        return {"title": self._doc_id, **make_doc_response(self.docs[self._doc_id])}
+
+
+def _two_doc_app(kind):
+    aliases = {"default": "a", "aliases": {"a": "doc_a", "b": "doc_b"}}
+    if kind == "write":
+        config.save_config(aliases)
+        service, cls = TwoDocService(_WRITE_DOCS), MyDocBotApp
+    else:
+        config.save_read_config(aliases)
+        service, cls = TwoDocService(_READ_DOCS), ReadOnlyApp
+    with patch('mydocbot_app.google_docs.get_service', return_value=service):
+        return cls()
+
+
+def _assert_selected(app, body):
+    """Exactly the item at `index` is highlighted, it's a note, and the preview shows it."""
+    notes = app.query_one("#notes-list")
+    children = list(notes.children)
+    highlighted = [i for i, child in enumerate(children) if child.has_class("-highlight")]
+    assert highlighted == [notes.index]
+    assert isinstance(children[notes.index], NoteItem)
+    assert children[notes.index].note_text.strip() == body
+    assert body in "".join(app.query_one("#preview-pane")._parts)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["write", "read"])
+async def test_load_highlights_the_newest_note_not_the_separator(kind, tmp_config_path, tmp_read_config_path):
+    app = _two_doc_app(kind)
+    async with mounted(app) as pilot:
+        await pilot.pause()
+        _assert_selected(app, "A newest")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["write", "read"])
+async def test_switch_shows_the_new_docs_note(kind, tmp_config_path, tmp_read_config_path):
+    app = _two_doc_app(kind)
+    async with mounted(app) as pilot:
+        app.handle_command('/switch b')
+        await settle(app, pilot)
+        await pilot.pause()
+        _assert_selected(app, "B newest")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("kind", ["write", "read"])
+async def test_refresh_keeps_the_chosen_note_highlighted(kind, tmp_config_path, tmp_read_config_path):
+    app = _two_doc_app(kind)
+    async with mounted(app) as pilot:
+        await pilot.pause()
+        notes = app.query_one("#notes-list")
+        notes.focus()
+        await pilot.press("down", "enter")      # choose "A second"
+        await pilot.pause()
+        app.handle_command('/refresh')
+        await settle(app, pilot)
+        await pilot.pause()
+        _assert_selected(app, "A second")
