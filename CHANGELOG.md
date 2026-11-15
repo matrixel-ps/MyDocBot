@@ -158,6 +158,11 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   changes; `tests/test_tui.py` passes unmodified.
 
 ### Fixed
+- **Wrong highlight and stale preview after the notes list reloads:** in both
+  TUIs, once a doc loads the newest note is highlighted (it used to be the
+  "Today" separator), and after `/switch` or `/refresh` the preview shows the
+  new doc's note and the note you had chosen stays highlighted. Before, the
+  preview could still show the previous doc's note after `/switch`.
 - **Discord watcher failing on about every other check:** the bot's 5-minute
   poll hit a connection Google had already closed and logged `Watch: can't
   read log — SSLError` about 6 times an hour. A dropped TLS connection is now

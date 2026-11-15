@@ -200,6 +200,7 @@ class BaseNotesApp(App):
         self.notes_cache = []
         self.all_tags = {}
         self._last_selected_index = 0
+        self._list_generation = 0  # bumped by each refresh_ui(); see _select_after_rebuild
         self._note_to_display = {}
         self._api_busy = None  # label of the Google call in flight, e.g. "saving note"
         # Every entry from the last whole-doc fetch, newest first, per doc_id (A5).
@@ -352,18 +353,20 @@ class BaseNotesApp(App):
         self._update_header()
 
         notes_list = self.query_one("#notes-list")
-        notes_list.clear()
+        self._list_generation += 1
         doc_notes = [n for n in self.notes_cache if n["doc_id"] == self.current_doc_id]
         idle_status = self._busy_text() if self._api_busy else "Ready"
 
         if not doc_notes:
             empty_msg = "Loading notes…" if self._api_busy == "loading notes" else self.EMPTY_NOTES_MSG
+            notes_list.clear()
             notes_list.append(
                 ListItem(Label(f"[#585b70]{empty_msg}[/]"))
             )
             self.update_status(idle_status)
             return
 
+        items = []
         current_date = None
         self._note_to_display = {}
         note_idx = 0
@@ -373,20 +376,35 @@ class BaseNotesApp(App):
             date_key = self._date_key(n["ts"])
             if date_key != current_date:
                 current_date = date_key
-                notes_list.append(DateSeparator(self._format_date_header(date_key)))
+                items.append(DateSeparator(self._format_date_header(date_key)))
                 display_idx += 1
-            item = NoteItem(n["ts"], n["text"], n["doc_id"], self._note_label(n["ts"]))
-            notes_list.append(item)
+            items.append(NoteItem(n["ts"], n["text"], n["doc_id"], self._note_label(n["ts"])))
             self._note_to_display[note_idx] = display_idx
             note_idx += 1
             display_idx += 1
 
         target_note = min(self._last_selected_index, note_idx - 1)
         display_target = self._note_to_display.get(target_note, 0)
-        notes_list.index = display_target
-        self.show_note_preview(display_target)
+        removed = notes_list.clear()
+        mounted = notes_list.extend(items)
+        self.call_later(self._select_after_rebuild, removed, mounted, display_target, self._list_generation)
 
         self.update_status(idle_status)
+
+    async def _select_after_rebuild(self, removed, mounted, display_target, generation):
+        """Select and preview a note once the list rebuild has settled (B14).
+
+        clear() and extend() finish asynchronously; until they do, the old
+        items are still children, so an index set straight away pointed at the
+        wrong item (the "Today" separator on load, nothing after /switch) and
+        the preview read the previous doc's note. A newer refresh_ui() makes
+        this one stale, so only the latest selects."""
+        await removed
+        await mounted
+        if generation != self._list_generation:
+            return
+        self.query_one("#notes-list").index = display_target
+        self.show_note_preview(display_target)
 
     def on_list_view_selected(self, event):
         notes_list = self.query_one("#notes-list")
