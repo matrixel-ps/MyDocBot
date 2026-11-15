@@ -1,23 +1,19 @@
 # MyDocBot — Backlog
 
-**This is the only list of open work for the project.** README, CHANGELOG, and
-the agent notes point here instead of keeping their own lists. Finished work is
-recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.md`
-(dated history), not here.
+**This is the list of open work for the project.** README and CHANGELOG point
+here instead of keeping their own lists. Finished work is recorded in
+`CHANGELOG.md`, not here.
 
 ## How to use this file
 
 - **Adding:** give the row the next unused ID in its category (`B` bugs, `P`
   privacy/hygiene, `F` features, `A` architecture, `D` docs/workflow). Never
-  reuse an ID, even after its row is deleted, so references in old task
-  sheets and history entries stay unambiguous.
-- **Status:** `open` → `in progress` (with a link to its `docs/tasks/<slug>.md`
-  sheet, created by `/task <ID>`) → row deleted when done. Use `blocked` with a
-  one-line reason in Notes when waiting on something.
-- **Done:** delete the row. `/log-change` records the work, citing the ID, in
-  `improvement-plan.md` and `CHANGELOG.md`.
-- **Dropped:** delete the row and note the ID and reason in the next
-  `improvement-plan.md` entry.
+  reuse an ID, even after its row is deleted, so references in old notes and
+  commits stay unambiguous.
+- **Status:** `open` → `in progress` → row deleted when done. Use `blocked`
+  with a one-line reason in Notes when waiting on something.
+- **Done:** delete the row; the `CHANGELOG.md` entry cites the ID.
+- **Dropped:** delete the row and say why in the commit message.
 - **Priority:** `high` / `med` / `low`. **Size:** XS < S < M < L. Both are
   estimates; adjust them freely.
 - `file:line` references were accurate when the row was written and drift as
@@ -64,8 +60,4 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
-| D11 | **Move the internal agent files out of the public repo** | open | med | M | AGENTS.md, CLAUDE.md, .claude/, docs/agent-notes/, docs/tasks/, lint.sh, tests/test_orient.py | Owner's choice (2026-11-15, during D10): don't publish them. They're ~360 KB and hold no secrets, and they stay in history either way. Needs a design: where they live instead (untracked here and ignored, or a separate private repo), keeping `/task`, `/finish` and doc-keeper working; `lint.sh` type-checks `.claude/skills/task/orient.py` and `tests/test_orient.py` tests it; README and AGENTS.md cross-links. Before P9. |
-| D6 | **Reuse the lint result within a task** | open | low | S | lint.sh, .claude/skills/* | Lint runs 3–4 times per task (baseline, verify, log-change, review-handoff). Save a summary (pass/fail, test count, mypy file count) keyed by a hash of `git diff HEAD`; rerun only when it changed, and print only the summary or the failures. |
-| D7 | **Run `/doc-audit` in a forked, cheaper-model context** | open | low | XS | .claude/skills/doc-audit/SKILL.md | It sweeps every doc and the code but only the findings matter. Try `context: fork` plus a `model:` setting in the frontmatter; test once before relying on it. |
-| D8 | **Shorter `/log-change` entries** | open | low | S | .claude/skills/log-change/SKILL.md | CHANGELOG and `improvement-plan.md` describe each change twice. Let history entries link the task sheet for detail instead of repeating it; keep the "why". |
-| D9 | **Brief's task-sheet list matches nearly every sheet** | open | low | XS | .claude/skills/task/orient.py `task_sheets()` | `orient.py D5 "log-change"` listed all 25 sheets, because every sheet's hand-off step names `/log-change`. Match only a sheet's title, Backlog line and Goal, or cap the list with a "N more" tail like the history matches. |
+| D11 | **Move the internal agent files out of the public repo** | in progress | med | M | AGENTS.md, CLAUDE.md, .claude/, docs/agent-notes/, docs/tasks/, lint.sh, tests/test_orient.py | Owner's choice (2026-11-15, during D10): don't publish them. They're ~360 KB and hold no secrets, and they stay in history either way. Needs a design: where they live instead (untracked here and ignored, or a separate private repo), keeping `/task`, `/finish` and doc-keeper working; `lint.sh` type-checks `.claude/skills/task/orient.py` and `tests/test_orient.py` tests it; README and AGENTS.md cross-links. Before P9. |

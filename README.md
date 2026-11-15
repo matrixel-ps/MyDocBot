@@ -477,8 +477,7 @@ The TUI uses a dark, Catppuccin-inspired theme.
 │                         timestamps, config, storage, paths, validation, commands,
 │                         discord_handler
 ├── tests/                One test_*.py per area; conftest.py isolates all data paths
-├── docs/                 architecture.md, backlog.md, task sheets, agent notes,
-│                         images/ (README screenshot)
+├── docs/                 architecture.md, backlog.md, images/ (README screenshot)
 ├── scripts/              make_screenshot.py: regenerates docs/images/tui.svg
 ├── docs_config.example.json
 ├── pyproject.toml        Package, entry points, `discord` extra; ruff, mypy, pytest, coverage config

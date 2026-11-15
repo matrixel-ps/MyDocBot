@@ -39,12 +39,6 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   formatting-only edits are ignored, and a doc that can't be read sends one
   warning after 3 failed checks, not an alert every time. It only reads the
   docs and stores fingerprints, not note text.
-- **Orientation brief for AI agent sessions:**
-  `python .claude/skills/task/orient.py <backlog ID or "keywords">` prints a
-  few KB of context (the backlog row, current state, design decisions and the
-  history entries that mention the terms, and git state). `/task` and
-  `AGENTS.md` start from it instead of reading every project doc in full,
-  which cut the reading at the start of a task from ~190 KB to 6–10 KB.
 - **Coverage report:** `bash coverage.sh` shows which lines the tests
   don't reach (`--html` for a browsable report). It's informational and
   not part of `lint.sh` or CI. Install `requirements-dev.txt` for it.
@@ -82,10 +76,6 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
   9.2.0 and others) so `pip install -r requirements-dev.txt` works on 3.15,
   and CI now also tests 3.15 (3.11, 3.14, 3.15). The minimum stays 3.11.
   pytest's async fixture loop scope is now set explicitly.
-- **One end-of-work step for AI agent sessions:** `/finish` runs lint once,
-  has a `doc-keeper` subagent update the changelog, README, backlog and agent
-  notes in the background, and writes the review handoff in the meantime.
-  `/task` ends with it; `/log-change` and `/review-handoff` still work alone.
 - **TUI list and preview (both TUIs):** the notes list now shows only each
   note's date and time (no preview text or tags), and the note is read in
   the preview pane, which now takes most of the width. Long notes wrap to the pane instead of scrolling
