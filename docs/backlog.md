@@ -25,8 +25,8 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 ## Suggested order
 
-1. **Going public:** P6 (license), D10 (README for new users), P7 (default
-   branch), P8 (security settings), then P9 (make the repo public).
+1. **Going public:** D10 (README for new users), P7 (default branch), P8
+   (security settings), then P9 (make the repo public).
 2. **A7:** config saves that don't overwrite another process's changes.
 3. **F9:** multi-doc tag aggregation.
 
@@ -40,10 +40,9 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
-| P6 | **Add a license** | open | high | XS | LICENSE, pyproject.toml | No LICENSE file, so the code is "all rights reserved" once public. Pick one (MIT is the usual choice for a personal tool), add `LICENSE`, and `license` + `urls` (repo, issues) to `pyproject.toml`. Needed before P9. |
 | P7 | **Default branch shows stale code** | open | med | XS | GitHub settings, main | `main` (GitHub's default) is ~90 commits behind `dev`. Either bring `main` up to date as a release (merge `dev`, maybe tag `v0.1.0`) or make `dev` the default. Before P9. |
 | P8 | **Repo security settings before going public** | open | med | S | GitHub settings, SECURITY.md | Turn on secret scanning + push protection, Dependabot alerts/updates (free for public repos); protect `main` with CI required; add `SECURITY.md`. Before or with P9. |
-| P9 | **Make the repo public** | open | med | XS | GitHub settings | After P6, P7, P8 and D10. History was cleaned on 2026-11-15 (see `docs/tasks/public-history-cleanup.md`); re-run its checks (removed paths, doc-ID strings, identities) on the final history first. |
+| P9 | **Make the repo public** | open | med | XS | GitHub settings | After P7, P8 and D10. History was cleaned on 2026-11-15 (see `docs/tasks/public-history-cleanup.md`); re-run its checks (removed paths, doc-ID strings, identities) on the final history first. |
 | P5 | **Revisit the minimum Python before 2027-10** | open | low | XS | pyproject.toml, .github/workflows/ci.yml, README | google-api-core lists Python 3.11's end of life as 2027-10-24 and already warns about it on 3.11. Before then, raise the minimum to 3.12 (same 6 spots as P4; check `ruff check . --target-version py312`). |
 
 ## Features

@@ -7,6 +7,8 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
 ## [Unreleased]
 
 ### Added
+- **MIT license:** a `LICENSE` file, and the package metadata now has the
+  license, author and project links (repo, issues).
 - **`/undo` for the last note:** remove the note you just wrote (a typo, the
   wrong doc, an accidental submit) from the CLI or the read/write TUI, or from
   a shell with `mydocbot --undo`. It deletes only if the top of the doc is
