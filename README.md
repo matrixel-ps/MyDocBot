@@ -457,3 +457,7 @@ are pinned in `requirements-dev.txt`.
 Known bugs, planned features, and ideas are tracked in
 [`docs/backlog.md`](docs/backlog.md); finished work is in
 [`CHANGELOG.md`](CHANGELOG.md).
+
+## License
+
+MyDocBot is released under the [MIT License](LICENSE).

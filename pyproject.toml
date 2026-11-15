@@ -1,5 +1,5 @@
 [build-system]
-requires = ["setuptools>=64"]
+requires = ["setuptools>=77"]  # 77: first to accept a PEP 639 license expression
 build-backend = "setuptools.build_meta"
 
 [project]
@@ -7,6 +7,9 @@ name = "mydocbot"
 version = "0.1.0"
 description = "Terminal note-taker that prepends timestamped notes to Google Docs"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [{name = "Matias M"}]
 requires-python = ">=3.11"
 # Direct runtime dependencies as ranges, for `pipx install -e .`. Exact,
 # tested pins live in requirements.txt; test/lint tools in requirements-dev.txt.
@@ -26,6 +29,11 @@ discord = ["discord.py>=2.4"]
 [project.scripts]
 mydocbot = "main:main"
 mydocbot-discord = "discord_bot:main"
+
+[project.urls]
+Homepage = "https://github.com/matrixel-ps/MyDocBot"
+Repository = "https://github.com/matrixel-ps/MyDocBot"
+Issues = "https://github.com/matrixel-ps/MyDocBot/issues"
 
 [tool.setuptools]
 py-modules = ["main", "mydocbot_app", "discord_bot"]
