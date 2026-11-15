@@ -227,5 +227,6 @@ touches real files. TUI tests use Textual's headless `run_test()` through
 | `test_dispatch.py` | `/remove` auto-switch paths |
 | `test_editor.py` | `resolve_editor()` fallback chain |
 | `test_validation.py` | Input validators |
+| `test_screenshot.py` | `scripts/make_screenshot.py` runs headless into `tmp_path`; the SVG has the made-up title and pinned day labels; the fake service refuses writes |
 | `test_orient.py` | The `/task` orientation brief (`.claude/skills/task/orient.py`) on fixture docs |
 | `test_tui.py` | Both TUIs headless: commands, background calls (with `BlockingService`), status escaping, date labels, list date/time labels and preview wrapping (both apps), `/more` cache, highlight and preview after load, `/switch` and `/refresh` (both apps) |
