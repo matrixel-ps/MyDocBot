@@ -25,18 +25,25 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 ## Suggested order
 
-1. **A7:** config saves that don't overwrite another process's changes.
-2. **F9:** multi-doc tag aggregation.
+1. **Going public:** P6 (license), D10 (README for new users), P7 (default
+   branch), P8 (security settings), then P9 (make the repo public).
+2. **A7:** config saves that don't overwrite another process's changes.
+3. **F9:** multi-doc tag aggregation.
 
 ## Bugs
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
+| B13 | **A `BrokenPipeError` on send fails all 3 retries** | open | low | S | core/google_docs.py `_api_call_with_retry` | Seen once in the bot's journal (2026-11-15 14:20, `Watch: can't read log — BrokenPipeError`). It is a `ConnectionError`, so it is retried, but httplib2 keeps the connection in its pool when `conn.request()` (the send) raises a `socket.error` other than ENETUNREACH/EADDRNOTAVAIL: only timeouts are popped from `Http.connections`. So every retry reuses the dead socket. Fix idea: before retrying a `ConnectionError`/`SSLError`, close the pooled connections (`service._http.http.connections`, via the google-auth `AuthorizedHttp` wrapper), with a test. Watch the journal first to see how often it happens after B12. |
 
 ## Privacy & repo hygiene
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
+| P6 | **Add a license** | open | high | XS | LICENSE, pyproject.toml | No LICENSE file, so the code is "all rights reserved" once public. Pick one (MIT is the usual choice for a personal tool), add `LICENSE`, and `license` + `urls` (repo, issues) to `pyproject.toml`. Needed before P9. |
+| P7 | **Default branch shows stale code** | open | med | XS | GitHub settings, main | `main` (GitHub's default) is ~90 commits behind `dev`. Either bring `main` up to date as a release (merge `dev`, maybe tag `v0.1.0`) or make `dev` the default. Before P9. |
+| P8 | **Repo security settings before going public** | open | med | S | GitHub settings, SECURITY.md | Turn on secret scanning + push protection, Dependabot alerts/updates (free for public repos); protect `main` with CI required; add `SECURITY.md`. Before or with P9. |
+| P9 | **Make the repo public** | open | med | XS | GitHub settings | After P6, P7, P8 and D10. History was cleaned on 2026-11-15 (see `docs/tasks/public-history-cleanup.md`); re-run its checks (removed paths, doc-ID strings, identities) on the final history first. |
 | P5 | **Revisit the minimum Python before 2027-10** | open | low | XS | pyproject.toml, .github/workflows/ci.yml, README | google-api-core lists Python 3.11's end of life as 2027-10-24 and already warns about it on 3.11. Before then, raise the minimum to 3.12 (same 6 spots as P4; check `ruff check . --target-version py312`). |
 
 ## Features
@@ -58,6 +65,7 @@ recorded in `CHANGELOG.md` (user-facing) and `docs/agent-notes/improvement-plan.
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
+| D10 | **README for new users** | open | med | M | README.md | The README assumes the owner's setup. A stranger needs: creating a Google Cloud project, enabling the Docs API, an OAuth "Desktop app" client, and the consent screen (in "Testing" mode tokens expire after 7 days). Add a TUI screenshot and a CI badge. Also decide whether the internal agent files (AGENTS.md, CLAUDE.md, .claude/, docs/agent-notes, docs/tasks, ~360 KB) stay in the public repo. Before P9. |
 | D6 | **Reuse the lint result within a task** | open | low | S | lint.sh, .claude/skills/* | Lint runs 3–4 times per task (baseline, verify, log-change, review-handoff). Save a summary (pass/fail, test count, mypy file count) keyed by a hash of `git diff HEAD`; rerun only when it changed, and print only the summary or the failures. |
 | D7 | **Run `/doc-audit` in a forked, cheaper-model context** | open | low | XS | .claude/skills/doc-audit/SKILL.md | It sweeps every doc and the code but only the findings matter. Try `context: fork` plus a `model:` setting in the frontmatter; test once before relying on it. |
 | D8 | **Shorter `/log-change` entries** | open | low | S | .claude/skills/log-change/SKILL.md | CHANGELOG and `improvement-plan.md` describe each change twice. Let history entries link the task sheet for detail instead of repeating it; keep the "why". |
