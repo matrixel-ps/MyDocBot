@@ -34,6 +34,7 @@ here instead of keeping their own lists. Finished work is recorded in
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
+| P10 | **CodeQL code scanning** | open | low | S | .github/workflows/codeql.yml | Free for public repos; fills the Security tab's empty "Code scanning" section and flags risky Python patterns on PRs and pushes. Add GitHub's CodeQL workflow for `python` (and `actions`, which checks the workflow files), on pushes and PRs to `dev` and `main` plus a weekly schedule, with `permissions` limited to what it needs (`security-events: write`, `contents: read`). Check the first run's findings and fix or dismiss each with a reason. Dependabot's `github-actions` updates will keep its action versions current. |
 | P5 | **Revisit the minimum Python before 2027-10** | open | low | XS | pyproject.toml, .github/workflows/ci.yml, README | google-api-core lists Python 3.11's end of life as 2027-10-24 and already warns about it on 3.11. Before then, raise the minimum to 3.12 (same 6 spots as P4; check `ruff check . --target-version py312`). |
 
 ## Features
@@ -55,3 +56,4 @@ here instead of keeping their own lists. Finished work is recorded in
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
+| D13 | **Contributor docs and issue templates** | open | med | S | CONTRIBUTING.md, .github/ISSUE_TEMPLATE/, .github/pull_request_template.md | The repo is public with Issues on, and GitHub's community profile is at 57% (no contributing guide, issue templates or PR template). `CONTRIBUTING.md`: set up a venv, run `bash lint.sh`, branch from `dev` (`main` is the latest release), tests stay mocked and never touch real data files. A bug-report issue form asking for the version, OS and command, with a clear warning never to paste doc IDs, notes, `token.json` or `credentials.json`, and a link to `SECURITY.md` for vulnerabilities (plus `config.yml` turning off blank issues). An optional short PR template (lint passes, CHANGELOG entry if user-facing). |
