@@ -1,6 +1,6 @@
 # MyDocBot
 
-[![CI](https://github.com/matrixel-ps/MyDocBot/actions/workflows/ci.yml/badge.svg?branch=dev)](https://github.com/matrixel-ps/MyDocBot/actions/workflows/ci.yml)
+[![CI](https://github.com/matrixel-ps/MyDocBot/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/matrixel-ps/MyDocBot/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 ![Python 3.11+](https://img.shields.io/badge/python-3.11%2B-blue.svg)
 
@@ -503,6 +503,12 @@ Tests mock the Google API and use temporary files, so they need no network
 or sign-in, and never touch your real data. CI runs `lint.sh` on Python 3.11,
 3.14 and 3.15 for every push and pull request to `main` and `dev`. Tool versions
 are pinned in `requirements-dev.txt`.
+
+### Branches and releases
+
+Work lands on `dev`. `main` is the latest release: at each release `dev` is
+fast-forwarded into it and tagged (`v0.1.0`, …), with the notes from
+[`CHANGELOG.md`](CHANGELOG.md) on the GitHub Releases page.
 
 ---
 

@@ -6,6 +6,10 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
 
 ## [Unreleased]
 
+## [0.1.0] - 2026-11-15
+
+First release.
+
 ### Added
 - **README for first-time users:** a screenshot of the TUI, CI / license /
   Python badges, a requirements line (Python 3.11+, Linux or macOS), and
@@ -297,3 +301,5 @@ including: single-threaded TUI (network calls block the UI), local-only tag
 index (no historical backfill), `#tag` regex limited to word characters,
 and independent read/write alias configs.
 
+[Unreleased]: https://github.com/matrixel-ps/MyDocBot/compare/v0.1.0...dev
+[0.1.0]: https://github.com/matrixel-ps/MyDocBot/releases/tag/v0.1.0
