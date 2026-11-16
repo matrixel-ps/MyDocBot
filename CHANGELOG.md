@@ -6,6 +6,16 @@ Open work (bugs, planned features) is tracked in [`docs/backlog.md`](docs/backlo
 
 ## [Unreleased]
 
+### Added
+- **Security policy:** `SECURITY.md` explains how to report a vulnerability
+  privately through GitHub (not as an issue).
+- **Dependabot:** weekly grouped update PRs for Python packages and GitHub
+  Actions, against `dev`, plus vulnerability alerts.
+
+### Changed
+- **CI runs with a read-only token,** so a workflow run can't push to the repo
+  or change its settings.
+
 ## [0.1.0] - 2026-11-15
 
 First release.
