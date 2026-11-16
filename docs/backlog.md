@@ -21,8 +21,8 @@ here instead of keeping their own lists. Finished work is recorded in
 
 ## Suggested order
 
-1. **Going public:** D11 (agent files out), P7 (default branch), P8 (security
-   settings), then P9 (make the repo public).
+1. **Going public:** P7 (default branch), P8 (security settings), then P9
+   (make the repo public).
 2. **A7:** config saves that don't overwrite another process's changes.
 3. **F9:** multi-doc tag aggregation.
 
@@ -38,7 +38,7 @@ here instead of keeping their own lists. Finished work is recorded in
 |---|---|---|---|---|---|---|
 | P7 | **Default branch shows stale code** | open | med | XS | GitHub settings, main | `main` (GitHub's default) is ~90 commits behind `dev`. Either bring `main` up to date as a release (merge `dev`, maybe tag `v0.1.0`) or make `dev` the default. Before P9. |
 | P8 | **Repo security settings before going public** | open | med | S | GitHub settings, SECURITY.md | Turn on secret scanning + push protection, Dependabot alerts/updates (free for public repos); protect `main` with CI required; add `SECURITY.md`. Before or with P9. |
-| P9 | **Make the repo public** | open | med | XS | GitHub settings | After P7, P8 and D11. History was cleaned on 2026-11-15 (see `docs/tasks/public-history-cleanup.md`); re-run its checks (removed paths, doc-ID strings, identities) on the final history first. |
+| P9 | **Make the repo public** | open | med | XS | GitHub settings | After P7 and P8. History was cleaned on 2026-11-15; re-run those checks on the final history first: no data-file or agent-workflow paths in any commit, no doc-ID-shaped strings, only the noreply identity. |
 | P5 | **Revisit the minimum Python before 2027-10** | open | low | XS | pyproject.toml, .github/workflows/ci.yml, README | google-api-core lists Python 3.11's end of life as 2027-10-24 and already warns about it on 3.11. Before then, raise the minimum to 3.12 (same 6 spots as P4; check `ruff check . --target-version py312`). |
 
 ## Features
@@ -60,4 +60,3 @@ here instead of keeping their own lists. Finished work is recorded in
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
-| D11 | **Move the internal agent files out of the public repo** | in progress | med | M | AGENTS.md, CLAUDE.md, .claude/, docs/agent-notes/, docs/tasks/, lint.sh, tests/test_orient.py | Owner's choice (2026-11-15, during D10): don't publish them. They're ~360 KB and hold no secrets, and they stay in history either way. Needs a design: where they live instead (untracked here and ignored, or a separate private repo), keeping `/task`, `/finish` and doc-keeper working; `lint.sh` type-checks `.claude/skills/task/orient.py` and `tests/test_orient.py` tests it; README and AGENTS.md cross-links. Before P9. |
