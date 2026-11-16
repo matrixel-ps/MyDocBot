@@ -1,0 +1,24 @@
+# Dependabot version updates: one grouped PR per ecosystem per week, against
+# dev (where work lands; see README "Branches and releases"). CI tests each
+# bump on every supported Python. Vulnerability alerts are a repository
+# setting; these weekly updates are how fixes reach dev.
+version: 2
+updates:
+  - package-ecosystem: "pip"
+    directory: "/"            # requirements.txt, requirements-dev.txt, pyproject.toml
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    groups:
+      pip-minor-and-patch:
+        update-types: ["minor", "patch"]
+    open-pull-requests-limit: 5
+
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    groups:
+      actions:
+        patterns: ["*"]

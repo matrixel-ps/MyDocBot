@@ -35,8 +35,8 @@ here instead of keeping their own lists. Finished work is recorded in
 
 | ID | Task | Status | Pri | Size | Location | Notes |
 |---|---|---|---|---|---|---|
-| P8 | **Repo security settings before going public** | open | med | S | GitHub settings, SECURITY.md | Turn on secret scanning + push protection, Dependabot alerts/updates (free for public repos); protect `main` with CI required; add `SECURITY.md`. Before or with P9. |
-| P9 | **Make the repo public** | open | med | XS | GitHub settings | After P8. History was cleaned on 2026-11-15; re-run those checks on the final history first: no data-file or agent-workflow paths in any commit, no doc-ID-shaped strings, only the noreply identity. |
+| P8 | **Repo security settings before going public** | in progress | med | S | GitHub settings, SECURITY.md | Turn on secret scanning + push protection, Dependabot alerts/updates (free for public repos); protect `main` with CI required; add `SECURITY.md`. Before or with P9. |
+| P9 | **Make the repo public** | open | med | S | GitHub settings | After P8. History was cleaned on 2026-11-15; re-run those checks on the final history first: no data-file or agent-workflow paths in any commit, no doc-ID-shaped strings, only the noreply identity. Right after the switch, the settings that need a public repo (from P8): secret scanning + push protection, private vulnerability reporting (`SECURITY.md` points to it), and a ruleset on `main` and `v*` tags blocking force pushes and deletion (no required PRs or checks, so the release fast-forward keeps working). |
 | P5 | **Revisit the minimum Python before 2027-10** | open | low | XS | pyproject.toml, .github/workflows/ci.yml, README | google-api-core lists Python 3.11's end of life as 2027-10-24 and already warns about it on 3.11. Before then, raise the minimum to 3.12 (same 6 spots as P4; check `ruff check . --target-version py312`). |
 
 ## Features

@@ -510,6 +510,9 @@ Work lands on `dev`. `main` is the latest release: at each release `dev` is
 fast-forwarded into it and tagged (`v0.1.0`, …), with the notes from
 [`CHANGELOG.md`](CHANGELOG.md) on the GitHub Releases page.
 
+To report a security problem, see [`SECURITY.md`](SECURITY.md) (privately,
+not as an issue).
+
 ---
 
 ## Open Work

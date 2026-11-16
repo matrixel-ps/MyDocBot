@@ -6,6 +6,11 @@ on:
   pull_request:
     branches: ["main", "dev"]
 
+# The default token could write to the repo; CI only needs to read it, so a
+# workflow run (including one from a pull request) can't push or change settings.
+permissions:
+  contents: read
+
 jobs:
   lint-and-test:
     runs-on: ubuntu-latest
